@@ -1,0 +1,47 @@
+# 一键起全栈:mysql + backend + frontend(nginx 托管前端并反代)
+# 使用:docker compose -f deploy/docker-compose.yml up --build
+# 访问:http://localhost:8080
+
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: potato_root
+      MYSQL_DATABASE: potato
+      MYSQL_USER: potato
+      MYSQL_PASSWORD: potato_pass
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ppotato_root"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    environment:
+      DATABASE_URL: mysql+pymysql://potato:potato_pass@mysql:3306/potato?charset=utf8mb4
+      JWT_SECRET: ${JWT_SECRET:-please-change-me-in-production-0123456789}
+      JWT_EXPIRE_DAYS: "7"
+      CORS_ORIGINS: http://localhost:8080
+      APP_ENV: prod
+    depends_on:
+      mysql:
+        condition: service_healthy
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  mysql_data:

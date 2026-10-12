@@ -1,0 +1,50 @@
+# SECoder(Kubernetes)部署清单骨架,见 docs/04-部署方案.md
+# 使用:镜像 tag 由 CI 流水线替换为 ${CI_COMMIT_SHORT_SHA}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: potato-backend
+  labels: { app: potato-backend }
+spec:
+  replicas: 1  # 骨架阶段单副本;WS 多副本需粘性会话或 Redis PubSec,见 docs/04 第 4 节
+  selector:
+    matchLabels: { app: potato-backend }
+  template:
+    metadata:
+      labels: { app: potato-backend }
+    spec:
+      containers:
+        - name: backend
+          image: registry.secoder.net/potato/backend:latest  # CI 中替换 tag
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: { name: potato-config }
+            - secretRef: { name: potato-secret }
+          readinessProbe:  # SECoder 探活
+            httpGet: { path: /api/v1/health, port: 8000 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: potato-frontend
+  labels: { app: potato-frontend }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: potato-frontend }
+  template:
+    metadata:
+      labels: { app: potato-frontend }
+    spec:
+      containers:
+        - name: frontend
+          image: registry.secoder.net/potato/frontend:latest  # CI 中替换 tag
+          ports:
+            - containerPort: 80
