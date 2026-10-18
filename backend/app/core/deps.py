@@ -30,7 +30,8 @@ def get_current_user(
         raise unauthorized("缺少 Bearer token")
     try:
         user_id = security.decode_token(credentials.credentials)
-    except jwt.InvalidTokenError:
+    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
+        # 签名错误/过期/缺少 sub/ sub 非整数都按无效 token 处理，避免 500
         raise unauthorized("token 无效或已过期")
     user = db.get(User, user_id)
     if user is None:

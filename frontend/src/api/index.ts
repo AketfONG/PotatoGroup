@@ -7,6 +7,7 @@ import { http, unwrap } from './http'
 import type {
   Conversation,
   ConversationItem,
+  DeleteAccountIn,
   FriendItem,
   FriendRequest,
   FriendRequestListOut,
@@ -18,6 +19,7 @@ import type {
   UserProfile,
   UserSearchOut,
   UserSummary,
+  UserUpdateIn,
 } from './types'
 
 // ---------- 认证 ----------
@@ -38,6 +40,19 @@ export async function logout(): Promise<void> {
 
 export async function myProfile(): Promise<UserProfile> {
   return unwrap<UserProfile>(http.get('/users/me'))
+}
+
+export async function updateProfile(payload: UserUpdateIn): Promise<UserProfile> {
+  return unwrap<UserProfile>(http.patch('/users/me', payload))
+}
+
+export async function getUser(userId: number): Promise<UserSummary> {
+  return unwrap<UserSummary>(http.get(`/users/${userId}`))
+}
+
+export async function deleteAccount(payload: DeleteAccountIn): Promise<void> {
+  // 注销必须再次携带当前密码，见 docs/02 用户章节
+  await unwrap(http.delete('/users/me', { data: payload }))
 }
 
 export async function searchUsers(keyword: string): Promise<UserSearchOut> {

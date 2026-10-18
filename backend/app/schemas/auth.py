@@ -12,9 +12,11 @@ class RegisterIn(BaseModel):
     @field_validator("name")
     @classmethod
     def name_not_blank(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("用户名不能为空白")
-        return v.strip()
+        v = v.strip()
+        # Field 的长度校验发生在去空格之前，这里按最终值再校验一次，避免 " a " 变成 1 字符用户名
+        if len(v) < 2:
+            raise ValueError("用户名长度需在 2-32 个字符之间")
+        return v
 
     @field_validator("password")
     @classmethod

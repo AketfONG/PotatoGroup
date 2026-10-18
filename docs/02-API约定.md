@@ -80,13 +80,16 @@ HTTP 状态码与业务错误码双层设计:HTTP 表达传输/鉴权层错误,`
 |---|---|---|---|
 | GET | `/api/v1/users/me` | 我的资料(需鉴权) | `UserProfile` |
 | PATCH | `/api/v1/users/me` | 修改资料(需鉴权) | `UserProfile` |
-| GET | `/api/v1/users?keyword=土豆` | 按用户名模糊搜索(加好友用,需鉴权) | `{ "items": [UserSummary] }` |
+| GET | `/api/v1/users?keyword=土豆` | 按用户名前缀搜索(加好友用,需鉴权) | `{ "items": [UserSummary] }` |
 | GET | `/api/v1/users/{user_id}` | 查看公开资料(需鉴权) | `UserSummary` |
-| DELETE | `/api/v1/users/me` | 注销账号(级联清理消息/好友,需鉴权) | `null` |
+| DELETE | `/api/v1/users/me` | 注销账号(需当前密码确认,级联清理社交/会话数据,需鉴权) | `null` |
 
 **UserSummary**:`{ user_id, name, avatar, online }`
 **UserProfile**:`{ user_id, name, avatar, email, phone, register_time, login_time }`
-修改密码:`PATCH /users/me` 请求体携带 `{ "old_password": "...", "new_password": "..." }`,需通过旧密码校验。
+**UserUpdateIn**:`{ name?, avatar?, email?, phone?, old_password?, new_password? }`
+修改密码:`PATCH /users/me` 请求体携带 `{ "old_password": "...", "new_password": "..." }`,需通过旧密码校验;新密码与注册规则一致(8–64 位,至少含字母与数字)。
+
+注销:`DELETE /users/me` 请求体为 `{ "password": "•••" }`,用于二次确认。服务端清理好友关系、好友申请、会话成员关系与用户链;私聊会话及其消息整体删除;群聊保留历史消息但将发送者置空;群主注销时优先转让给管理员,其次最早加入的成员,无剩余成员则删除群聊。
 
 ## 4. 好友 `/friends` 与 `/friend-requests`
 
@@ -156,7 +159,7 @@ HTTP 状态码与业务错误码双层设计:HTTP 表达传输/鉴权层错误,`
 
 | 事件 type | 触发 | `data` |
 |---|---|---|
-| `message.new` | 新消息(含单聊/群聊) | `Message`;`prev_seq` 为发送方链上上一条消息的 seq,客户端比对本地 cursor,不一致立即调用 `/sync` 补拉 |
+| `message.new` | 新消息(含单聊/群聊) | `Message`;`prev_seq` 为该接收事件用户自己用户链上上一条消息的 seq,客户端比对本地 cursor,不一致立即调用 `/sync` 补拉 |
 | `message.recall` | 有人撤回消息 | `{ msg_id, conversation_id }` |
 | `message.delete` | 本端多设备同步删除 | `{ msg_id, conversation_id }` |
 | `read.sync` | 其他端上报已读(多端同步) | `{ conversation_id, read_index }` |

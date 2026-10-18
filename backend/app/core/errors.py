@@ -51,8 +51,14 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation(request: Request, exc: RequestValidationError):
-        # 参数校验失败统一归入业务码 1001
-        return JSONResponse(status_code=400, content=_envelope(1001, "请求参数错误", exc.errors()[:5]))
+        # 参数校验失败统一归入业务码 1001。
+        # 只保留 JSON 安全字段：Pydantic v2 的 ctx 可能包含 ValueError 对象，
+        # 直接塞进 JSONResponse 会导致序列化失败并变成 500。
+        details = [
+            {"loc": list(err.get("loc", [])), "msg": err.get("msg", ""), "type": err.get("type", "")}
+            for err in exc.errors()[:5]
+        ]
+        return JSONResponse(status_code=400, content=_envelope(1001, "请求参数错误", details))
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http(request: Request, exc: StarletteHTTPException):

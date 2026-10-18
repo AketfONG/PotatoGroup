@@ -5,11 +5,12 @@
 """
 
 import jwt
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
+from sqlalchemy.orm import Session
 
 from app.core import security
-from app.db.base import SessionLocal
+from app.core.deps import get_db
 from app.models import User
 from app.services.connection_manager import manager
 
@@ -21,8 +22,11 @@ class Ping(BaseModel):
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: str = Query(default="")):
-    db = SessionLocal()
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: str = Query(default=""),
+    db: Session = Depends(get_db),
+):
     user_id = 0
     try:
         if not token:
@@ -57,4 +61,3 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(default=""
     finally:
         if user_id:
             manager.disconnect(user_id, websocket)
-        db.close()

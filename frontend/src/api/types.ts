@@ -28,6 +28,19 @@ export interface UserProfile {
   login_time: number | null
 }
 
+export interface UserUpdateIn {
+  name?: string | null
+  avatar?: string | null
+  email?: string | null
+  phone?: string | null
+  old_password?: string | null
+  new_password?: string | null
+}
+
+export interface DeleteAccountIn {
+  password: string
+}
+
 export interface UserSearchOut {
   items: UserSummary[]
 }
