@@ -1,0 +1,94 @@
+# GitLab CI/CD 流水线。
+#
+# 课程要求:后端单测覆盖率 >= 80%,并由 SonarQube 质量门禁把关
+# (https://man.t.secoder.net/sonar.html)。
+#
+# 重要:课程文档明确要求**不要把 CI 模板用远程 include: 引用**
+# (Runner 访问外网不稳定),模板内容必须像本文件这样直接内联。
+#
+# 使用前需在 GitLab 项目的 Settings → CI/CD → Variables 配置:
+#   SONAR_HOST_URL   = https://sonar.t.secoder.net          (普通变量)
+#   SONAR_TOKEN      = SonarQube 项目分析令牌                (Masked + Protected,关闭变量展开)
+# 并把默认分支设为 Protected(Settings → Repository → Branch rules),
+# 否则受保护变量读不到,sonarqube-check 会鉴权失败。
+
+stages:
+  - test
+  - quality
+
+# ============================================================
+# 后端单测 + 覆盖率报告
+# ============================================================
+unit-test:
+  stage: test
+  # 与生产镜像 deploy/Dockerfile.backend 的 python:3.11-slim 保持一致。
+  # 本地开发用的 3.13 不代表 CI 通过。
+  image: python:3.11-slim
+  variables:
+    # 测试自带的 conftest.py 会覆盖 DATABASE_URL 指向临时库,
+    # 这里显式声明是为了避免任何情况下连到真实数据库。
+    DATABASE_URL: sqlite:///./ci-test.db
+    APP_ENV: test
+    JWT_SECRET: ci-test-secret-0123456789abcdefghijklmnop
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  before_script:
+    - python -m pip install --quiet -r backend/requirements.txt
+  script:
+    # 从仓库根执行:覆盖率报告路径与 Sonar 扫描路径都依赖于此。
+    - sh scripts/test.sh
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - coverage-reports/coverage.xml
+      - xunit-reports/xunit-result.xml
+    reports:
+      junit: xunit-reports/xunit-result.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage-reports/coverage.xml
+
+# ============================================================
+# 前端类型检查(不设覆盖率要求,课程只要求后端)
+# ============================================================
+frontend-typecheck:
+  stage: test
+  image: node:20-alpine
+  before_script:
+    - cd frontend
+    # AGENTS.md 规则 6:有 lockfile,必须用 npm ci,不要用 npm install
+    - npm ci
+  script:
+    - npx vue-tsc --noEmit
+
+# ============================================================
+# SonarQube 质量扫描 + 门禁
+# ============================================================
+sonarqube-check:
+  stage: quality
+  image:
+    name: sonarsource/sonar-scanner-cli:11
+    entrypoint: [""]
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+    # 保留完整提交历史,供 Sonar 做问题归因
+    GIT_DEPTH: "0"
+  cache:
+    key: "sonar-cache-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .sonar/cache
+  needs:
+    - job: unit-test
+      artifacts: true
+  script:
+    # 先确认报告真的产出了,避免"扫描通过但覆盖率是 0"这种静默失败
+    - test -s coverage-reports/coverage.xml
+    - test -s xunit-reports/xunit-result.xml
+    - sonar-scanner
+      -Dsonar.host.url="${SONAR_HOST_URL}"
+      -Dsonar.qualitygate.wait=true
+      -Dsonar.qualitygate.timeout=300
+  # 课程要求:模板默认的 allow_failure: true 必须改为 false,否则不构成门禁
+  allow_failure: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
