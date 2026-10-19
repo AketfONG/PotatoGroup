@@ -191,11 +191,25 @@ deploy:
         --docker-password="${GITLAB_DEPLOY_TOKEN}" \
         --dry-run=client -o yaml | \
         kubectl --token="${TOKEN}" -n "${NAMESPACE}" apply -f -
-    # 把镜像占位符替换为本次提交构建出的镜像(与课程模板同做法)
-    - sed -i "s|BACKEND_IMAGE|${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHA}|g" deploy/backend.yaml
-    - sed -i "s|FRONTEND_IMAGE|${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHA}|g" deploy/frontend.yaml
-    # JWT_SECRET 不落仓库:每次部署用 CI 变量重写字面量
-    - sed -i "s|CHANGE_ME_CI_WILL_OVERRIDE|${JWT_SECRET}|g" deploy/kustomization.yaml
+    # 把镜像占位符替换为本次提交构建出的镜像(与课程模板同做法)。
+    # ⚠️ 路径随 deploy/ 目录结构调整过,改动目录结构时必须同步这四行。
+    - |
+      set -eu
+      BACKEND_PATCH=deploy/backend/patch.yaml
+      FRONTEND_PATCH=deploy/frontend/patch.yaml
+      ROOT_KUST=deploy/kustomization.yaml
+      for f in "$BACKEND_PATCH" "$FRONTEND_PATCH" "$ROOT_KUST"; do
+        if [ ! -f "$f" ]; then
+          echo "错误:找不到 $f —— 目录结构已变动,请同步 .gitlab-ci.yml 中 deploy 作业的路径"
+          exit 1
+        fi
+      done
+      sed -i "s|image: BACKEND_IMAGE|image: ${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHA}|g" "$BACKEND_PATCH"
+      sed -i "s|image: FRONTEND_IMAGE|image: ${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHA}|g" "$FRONTEND_PATCH"
+      # JWT_SECRET 不落仓库:每次部署用 CI 变量重写字面量
+      sed -i "s|CHANGE_ME_CI_WILL_OVERRIDE|${JWT_SECRET}|g" "$ROOT_KUST"
+      # 回显实际写入的镜像地址,便于在日志里核对
+      grep -n 'image: ' "$BACKEND_PATCH" "$FRONTEND_PATCH"
   script:
     - |
       set -eu

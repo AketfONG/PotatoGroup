@@ -79,7 +79,7 @@ flowchart LR
 │   ├── src/views/           # LoginView / ChatView
 │   └── src/components/      # ConversationList / MessageList / MessageInput
 ├── nginx/                   # 反向代理:静态资源 + /api + /ws 转发
-├── deploy/                  # Dockerfile ×2 / docker-compose.yml / secoder/ K8s 清单
+├── deploy/                  # K8s 清单(kustomization + manifests + patches)与镜像 Dockerfile
 └── scripts/                 # setup.sh 初始化 / dev.sh 一键启动(均已实测)
 ```
 
@@ -162,7 +162,7 @@ flowchart LR
 ## 11. 部署
 
 - **Docker 单机全栈**:`docker compose -f deploy/docker-compose.yml up --build` → http://localhost:8080(MySQL + 后端 + 前端 + Nginx);
-- **SECoder(K8s)**:清单在 `deploy/secoder/`(Deployment / Service / Ingress TLS / ConfigMap+Secret),完整流程见 [docs/04-部署方案.md](docs/04-部署方案.md);
+- **SECoder(K8s)**:清单在 `deploy/`,由 Kustomize 渲染(`kubectl kustomize deploy` 可本地预览;应用为 `kubectl apply -k deploy`),完整流程与所需 CI 变量见 [docs/04-部署方案.md](docs/04-部署方案.md);
 - 镜像 tag 由 CI 注入(`${CI_COMMIT_SHORT_SHA}`);`JWT_SECRET` 与数据库密码**只走 Secret**,不落仓库。
 
 ## 12. 安全红线(课程硬性要求,答辩必查)
