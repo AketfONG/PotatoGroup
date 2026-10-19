@@ -1,0 +1,27 @@
+# 补丁:前端 Deployment(基础资源里的容器名为 nginx)。
+#
+# 基础模板的容器端口已经是 80 且名为 http,Service/frontend 也指向该命名端口,
+# 因此这里只需替换镜像 —— 端口保持不变。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: gitlab-registry
+      containers:
+        - name: nginx
+          # 占位符:由 CI 的 deploy 作业替换为
+          # ${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHA}
+          image: FRONTEND_IMAGE
+          resources:
+            # g-* 命名空间配额:requests 256m CPU / 512Mi,limits 8 CPU / 16Gi
+            # 前后端合计 requests 100m / 228Mi,留有余量
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi

@@ -7,6 +7,8 @@ COPY frontend .
 RUN npm run build
 
 FROM nginx:1.27-alpine
+# 前端容器只托管静态资源。/api 与 /ws 由 HTTPRoute 直连后端
+# (见 deploy/route.yaml),不经过 nginx 反代。
 COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80

@@ -1,20 +1,17 @@
-# GitLab CI/CD 流水线。
+# GitLab CI/CD 流水线:test → quality → build → deploy
 #
-# 课程要求:后端单测覆盖率 >= 80%,并由 SonarQube 质量门禁把关
-# (https://man.t.secoder.net/sonar.html)。
+# 课程要求(https://man.t.secoder.net/sonar.html)与《后端部署》手册:
+#   后端单测覆盖率 >= 80%,由 SonarQube 质量门禁把关;
+#   扫描失败必须阻断构建与部署。
 #
 # 重要:课程文档明确要求**不要把 CI 模板用远程 include: 引用**
 # (Runner 访问外网不稳定),模板内容必须像本文件这样直接内联。
-#
-# 使用前需在 GitLab 项目的 Settings → CI/CD → Variables 配置:
-#   SONAR_HOST_URL   = https://sonar.t.secoder.net          (普通变量)
-#   SONAR_TOKEN      = SonarQube 项目分析令牌                (Masked + Protected,关闭变量展开)
-# 并把默认分支设为 Protected(Settings → Repository → Branch rules),
-# 否则受保护变量读不到,sonarqube-check 会鉴权失败。
 
 stages:
   - test
   - quality
+  - build
+  - deploy
 
 # ============================================================
 # 后端单测 + 覆盖率报告
@@ -25,8 +22,6 @@ unit-test:
   # 本地开发用的 3.13 不代表 CI 通过。
   image: python:3.11-slim
   variables:
-    # 测试自带的 conftest.py 会覆盖 DATABASE_URL 指向临时库,
-    # 这里显式声明是为了避免任何情况下连到真实数据库。
     DATABASE_URL: sqlite:///./ci-test.db
     APP_ENV: test
     JWT_SECRET: ci-test-secret-0123456789abcdefghijklmnop
@@ -71,7 +66,6 @@ sonarqube-check:
     entrypoint: [""]
   variables:
     SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
-    # 保留完整提交历史,供 Sonar 做问题归因
     GIT_DEPTH: "0"
   cache:
     key: "sonar-cache-${CI_COMMIT_REF_SLUG}"
@@ -88,7 +82,123 @@ sonarqube-check:
       -Dsonar.host.url="${SONAR_HOST_URL}"
       -Dsonar.qualitygate.wait=true
       -Dsonar.qualitygate.timeout=300
-  # 课程要求:模板默认的 allow_failure: true 必须改为 false,否则不构成门禁
   allow_failure: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# ============================================================
+# 镜像构建(BuildKit)
+#
+# 一个仓库构建两个镜像:通过覆盖模板变量实现
+# (BUILDKIT_CONTEXT / BUILDKIT_DOCKERFILE_DIR / BUILDKIT_IMAGE_NAME)。
+# 课程文档只给了单镜像示例,此处属变量扩展用法;若 Runner 上不生效,
+# 备选方案是拆成前后端两个 GitLab 项目、各放一个根目录 Dockerfile。
+# ============================================================
+.buildkit:
+  image:
+    name: moby/buildkit:rootless
+    entrypoint: [""]
+  stage: build
+  variables:
+    BUILDKITD_CONFIG: /tmp/buildkitd.toml
+    BUILDKITD_FLAGS: --oci-worker-no-process-sandbox --config /tmp/buildkitd.toml
+    BUILDKIT_FRONTEND: dockerfile.v0
+    BUILDKIT_OUTPUT_TYPE: image
+    BUILDKIT_PUSH: "true"
+  before_script:
+    - mkdir -p ~/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > ~/.docker/config.json
+    - |
+      cat > "$BUILDKITD_CONFIG" <<'EOF'
+      [registry."docker.io"]
+        insecure = true
+      EOF
+  script:
+    - |
+      buildctl-daemonless.sh build \
+        --frontend "${BUILDKIT_FRONTEND}" \
+        --local context="${BUILDKIT_CONTEXT}" \
+        --local dockerfile="${BUILDKIT_DOCKERFILE_DIR}" \
+        --import-cache type=registry,ref="${BUILDKIT_CACHE_REF}" \
+        --export-cache type=registry,ref="${BUILDKIT_CACHE_REF}",mode=max \
+        --output type="${BUILDKIT_OUTPUT_TYPE}",name="${BUILDKIT_IMAGE_NAME}:${BUILDKIT_IMAGE_TAG}",push="${BUILDKIT_PUSH}"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+build-backend:
+  extends: .buildkit
+  variables:
+    BUILDKIT_CONTEXT: .
+    BUILDKIT_DOCKERFILE_DIR: deploy
+    BUILDKIT_IMAGE_NAME: $CI_REGISTRY_IMAGE/backend
+    BUILDKIT_IMAGE_TAG: $CI_COMMIT_SHA
+    # 前后端分开缓存,避免互相覆盖
+    BUILDKIT_CACHE_REF: $CI_REGISTRY_IMAGE/backend:buildcache
+
+build-frontend:
+  extends: .buildkit
+  variables:
+    BUILDKIT_CONTEXT: .
+    BUILDKIT_DOCKERFILE_DIR: deploy
+    BUILDKIT_IMAGE_NAME: $CI_REGISTRY_IMAGE/frontend
+    BUILDKIT_IMAGE_TAG: $CI_COMMIT_SHA
+    BUILDKIT_CACHE_REF: $CI_REGISTRY_IMAGE/frontend:buildcache
+
+# ============================================================
+# 部署(Kustomize + ApplySet)
+# ============================================================
+deploy:
+  stage: deploy
+  image:
+    name: alpine/k8s:1.35.1
+    entrypoint: [""]
+  variables:
+    KUSTOMIZE_PATH: deploy
+  needs:
+    # 显式依赖质量门禁与两个构建作业:任一失败都不部署
+    - job: sonarqube-check
+      artifacts: false
+    - job: build-backend
+      artifacts: false
+    - job: build-frontend
+      artifacts: false
+  before_script:
+    - |
+      set -eu
+      : "${TOKEN:?TOKEN is required}"
+      : "${NAMESPACE:?NAMESPACE is required}"
+      : "${JWT_SECRET:?JWT_SECRET is required}"
+      : "${GITLAB_REGISTRY_USER:?GITLAB_REGISTRY_USER is required}"
+      : "${GITLAB_DEPLOY_TOKEN:?GITLAB_DEPLOY_TOKEN is required}"
+    # 私有 Registry 的拉取凭据:K8s 在 CI 作业结束后仍需拉取镜像
+    - |
+      kubectl --token="${TOKEN}" -n "${NAMESPACE}" \
+        create secret docker-registry gitlab-registry \
+        --docker-server="${CI_REGISTRY}" \
+        --docker-username="${GITLAB_REGISTRY_USER}" \
+        --docker-password="${GITLAB_DEPLOY_TOKEN}" \
+        --dry-run=client -o yaml | \
+        kubectl --token="${TOKEN}" -n "${NAMESPACE}" apply -f -
+    # 把镜像占位符替换为本次提交构建出的镜像(与课程模板同做法)
+    - sed -i "s|BACKEND_IMAGE|${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHA}|g" deploy/backend.yaml
+    - sed -i "s|FRONTEND_IMAGE|${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHA}|g" deploy/frontend.yaml
+    # JWT_SECRET 不落仓库:每次部署用 CI 变量重写字面量
+    - sed -i "s|CHANGE_ME_CI_WILL_OVERRIDE|${JWT_SECRET}|g" deploy/kustomization.yaml
+  script:
+    - |
+      set -eu
+      : "${KUBERNETES_SERVICE_HOST:?not running in k8s?}"
+      : "${KUBERNETES_SERVICE_PORT:?not running in k8s?}"
+      # 先渲染一遍,配置错误在 apply 之前就暴露
+      kubectl kustomize "${KUSTOMIZE_PATH}" > /dev/null
+      export KUBECTL_APPLYSET=true
+      kubectl \
+        --token="${TOKEN}" \
+        -n "${NAMESPACE}" \
+        apply -k "${KUSTOMIZE_PATH}" \
+        --applyset="gitops-ci-${CI_PROJECT_PATH_SLUG:-unknown}" \
+        --prune
+      kubectl --token="${TOKEN}" -n "${NAMESPACE}" rollout status statefulset/backend --timeout=180s
+      kubectl --token="${TOKEN}" -n "${NAMESPACE}" rollout status deployment/frontend --timeout=180s
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

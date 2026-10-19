@@ -1,0 +1,34 @@
+# SECoder(Kubernetes)部署入口。
+#
+# 用法:CI 的 deploy 作业执行 `kubectl apply -k deploy --prune`
+# 本地预览(不改集群):`kubectl kustomize deploy`
+#
+# 结构与课程模板一致:远程引用基础资源 + 4 个补丁。
+# 基础资源自带:Deployment/frontend、StatefulSet/backend、Service/backend
+# (port 80 → targetPort http)、Service/frontend(port 80)、
+# HTTPRoute/route(只有 parentRefs,hostname 由 route.yaml 补)。
+#
+# 注意:课程模板用 git@github.com:... 的 SSH 形式。若 CI Runner 无法解析该地址,
+# 可改为 https 形式:https://github.com/THUSE-Course/secoder-tmpl.git/deploy/basic/
+resources:
+  - git@github.com:THUSE-Course/secoder-tmpl.git/deploy/basic/
+  - configmap.yaml
+
+patches:
+  # 补 hostname(admission 强制:必须以本命名空间名开头)
+  - path: route.yaml
+  # 覆盖前端镜像
+  - path: frontend.yaml
+  # 覆盖后端镜像、环境变量与探针
+  - path: backend.yaml
+  # 后端持久化:挂载 PVC 到 /data(SQLite 数据不能放容器可写层)
+  - path: pvc.yaml
+
+# 密钥不落仓库:CI 的 deploy 作业用 ${JWT_SECRET} 生成该 Secret,
+# 保证每次部署后 Secret 内容与 CI 变量一致(见 .gitlab-ci.yml 的 deploy 作业)。
+secretGenerator:
+  - name: potato-secret
+    literals:
+      - JWT_SECRET=CHANGE_ME_CI_WILL_OVERRIDE
+    options:
+      disableNameSuffixHash: true

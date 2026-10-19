@@ -1,0 +1,30 @@
+# 补丁:后端持久化。
+#
+# 为什么必须做:后端默认用 SQLite,而容器可写层在 Pod 重建后会丢失
+# (课程文档明确要求「不要依赖容器可写层保存数据」)。
+# DATABASE_URL 因此指向挂载点内的文件:/data/potato.db(见 configmap.yaml)。
+#
+# SECoder 只允许 nfs-tmp 这一个 StorageClass(admission 硬校验),
+# 且存量上限为 10Gi / 5 个 PVC。
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: backend
+spec:
+  template:
+    spec:
+      containers:
+        - name: backend
+          volumeMounts:
+            - name: backend-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: backend-data
+      spec:
+        storageClassName: nfs-tmp
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

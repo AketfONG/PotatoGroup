@@ -1,0 +1,45 @@
+# 补丁:后端 StatefulSet(基础资源里的容器名为 backend,监听容器端口 80)。
+#
+# 基础模板的容器端口是 80 且名为 http,Service/backend 用 targetPort: http 解析,
+# 因此**不要改端口名**,后端镜像也必须监听 80(见 Dockerfile 的 uvicorn --port 80)。
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: backend
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: gitlab-registry
+      containers:
+        - name: backend
+          # 占位符:由 CI 的 deploy 作业替换为
+          # ${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHA}
+          image: BACKEND_IMAGE
+          # 配置与密钥全部走 ConfigMap / Secret,不落仓库
+          envFrom:
+            - configMapRef:
+                name: potato-config
+            - secretRef:
+                name: potato-secret
+          # 健康检查使用统一响应包络接口,返回 code=0 即视为可服务
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            # 后端略低于前端(模板注释口径:后端 100Mi)
+            requests:
+              cpu: 50m
+              memory: 100Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi

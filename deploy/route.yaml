@@ -1,0 +1,53 @@
+# 补丁:HTTPRoute 的 hostname,并修掉两个会直接打坏应用的模板问题。
+#
+# 目标:基础资源里唯一的 HTTPRoute,名为 route(metadata.name: route)。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route
+spec:
+  # ⚠️ admission 策略强制:hostnames 里的每个值都必须以**本命名空间名**开头
+  #    (见 secoder-tmpl/secoder/policy/validate-secoder-route.yaml)。
+  #    命名空间为 u-2023012787,故域名必须以 u-2023012787 开头。
+  #    最终值需与 SECoder 平台分配的命名空间/域名一致后再改这里。
+  hostnames:
+    - u-2023012787-potato-messanger.t.secoder.net
+
+  rules:
+    # ---------- 覆盖模板的 /api 规则 ----------
+    # 模板原本对 /api 做了 URLRewrite(ReplacePrefixMatch: /),会把
+    # /api/v1/auth/login 变成 /v1/auth/login —— 后端 FastAPI 的路由前缀
+    # 就是 /api/v1,去掉前缀会全部 404。这里**保留完整路径**,不做重写。
+    #
+    # 说明:补丁会替换掉原本 URLRewrite 的位置,因此这里显式不写 filters;
+    # 若渲染结果里发现 /api 规则仍带 URLRewrite,说明该 patch 未命中,
+    # 需要用 `kubectl kustomize deploy` 核对输出(见 docs/04 的验证步骤)。
+    - backendRefs:
+        - name: frontend
+          port: 80
+          kind: Service
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+    - backendRefs:
+        - name: backend
+          port: 80
+          kind: Service
+      matches:
+        - path:
+            type: PathPrefix
+            value: /api
+    # ---------- 新增 /ws 规则 ----------
+    # 模板只覆盖 / 与 /api,/ws 会被 / 兜住转发到前端 nginx。
+    # 虽然我们的 nginx 也配了 /ws 反代,但直连后端更短、少一跳,
+    # 且避免 nginx 未开启 upgrade 时握手失败。
+    # 后端 WebSocket 路由就注册在 /ws(见 backend/app/api/v1/ws.py),无需改写路径。
+    - backendRefs:
+        - name: backend
+          port: 80
+          kind: Service
+      matches:
+        - path:
+            type: PathPrefix
+            value: /ws

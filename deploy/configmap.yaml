@@ -1,0 +1,14 @@
+# 非敏感运行时配置。JWT_SECRET 等密钥走 Secret,严禁提交仓库(见 docs/04 安全清单)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: potato-config
+data:
+  # ⚠️ 必须指向持久卷 /data 内,否则 Pod 重建即丢数据(容器可写层不持久)
+  DATABASE_URL: "sqlite:////data/potato.db"
+  JWT_EXPIRE_DAYS: "7"
+  # 生产环境放开调试与详细错误
+  APP_ENV: "prod"
+  # 前端与后端同域(经 HTTPRoute 统一入口),同源请求本不需要 CORS;
+  # 这里填应用域名,便于将来前端单独部署时的跨域调用。
+  CORS_ORIGINS: "https://u-2023012787-potato-messanger.t.secoder.net"
