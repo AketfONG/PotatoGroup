@@ -172,3 +172,75 @@ D 承担消息存储、实时性、同步和可靠性等技术复杂度较高的
 - 每人准备自己实现的功能逻辑、数据变化、权限和异常处理，供答辩使用。
 - 单项任务完成须满足：合并并部署可用、联调通过、必要测试完成、文档更新、本人能解释实现。
 - 全员遵守提交、分支和合并请求规范，已交付功能在主分支持续可用。
+
+## 9. 当前测试状态
+
+### 9.1 怎么跑
+
+从**仓库根目录**执行（路径很重要，覆盖率报告依赖运行目录，详见 `.coveragerc` 的 `source = .`）：
+
+```bash
+python -m pytest                 # 全部后端单测 + 覆盖率（CI 用的是这条）
+```
+
+无需手动装依赖，首次执行 `scripts/setup.sh` 即可。CI 上由 `scripts/test.sh` 调用同一套配置。
+
+**只跑单个文件时**，必须关掉覆盖率门槛，否则即使用例全绿也会因为「全量覆盖率不足 80%」而报错退出：
+
+```bash
+python -m pytest backend/tests/test_message_flow.py -v -o addopts=""
+```
+
+原因：`pytest.ini` 的 `addopts` 里带了 `--cov-fail-under=80`，它检查的是**整个项目**的覆盖率。
+只跑一个文件时覆盖率自然远低于 80%，于是 `18 passed` 之后仍会 `FAIL Required test coverage of 80% not reached`。
+
+
+### 9.2 现状（截至 commit `e0e4d34`）
+
+| 指标 | 数值 |
+| ---- | ---- |
+| 用例数 | **90 passed + 1 xfailed** |
+| 后端覆盖率 | **96.52%**（要求 ≥80%） |
+| 覆盖率门槛 | `pytest.ini` 的 `--cov-fail-under=80`，低于即失败 |
+
+那 1 个 `xfailed` 是**有意保留**的：`test_error_paths.py::test_register_blank_name_rejected` 记录了一个已知缺陷（见 9.4）。`xfail` 不算失败，流水线正常通过。
+
+### 9.3 测试文件
+
+| 文件 | 覆盖内容 |
+| ---- | -------- |
+| `test_smoke.py` | 应用可启动、健康检查 |
+| `test_message_flow.py` | 端到端主链路：发送 / 写扩散 / 同步 / 已读 / 历史 / 撤回 / 删除 |
+| `test_coverage_gaps.py` | 会话管理、用户资料、好友、群聊与鉴权边界 |
+| `test_websocket.py` | WebSocket 连接、推送、多端、断线 |
+| `test_error_paths.py` | 错误分支与边界：好友删除、好友申请拒绝、建群权限、回复校验、sync 非消息记录 |
+
+测试基础设施在仓库根 `conftest.py`：自动使用**临时 SQLite 库**（不会碰 `backend/potato.db`）、提供 `TestClient`、每个用例结束清空所有表。
+
+### 9.4 已知缺陷（未修复）
+
+**参数校验在自定义校验器下退化成 500** —— 属 B 的域。
+
+- 位置：`backend/app/core/errors.py:55`
+- 现象：校验失败来自**自定义 `field_validator`**（内部 `raise ValueError`）时，`errors()` 的 `ctx['error']` 是原始 `ValueError` 对象，不可 JSON 序列化，异常处理器自身抛 `TypeError`
+- 结果：用户收到 **500 / 9001「服务器内部错误」**，而非 400 / 1001，且真正的提示（如「用户名不能为空白」）被吞掉
+- 影响面：所有自定义 `field_validator`，不止注册接口
+
+实测对照：
+
+| 输入 | 实际返回 | 应该 |
+| ---- | -------- | ---- |
+| `{"name": "   "}`（自定义 validator） | 500 / 9001 | 400 / 1001 |
+| `{"password": "x"}`（纯 schema 约束） | 400 / 1001 ✅ | 400 / 1001 |
+| 缺 `password` 字段（纯 schema 约束） | 400 / 1001 ✅ | 400 / 1001 |
+
+证据在 `backend/tests/test_error_paths.py` 的 `xfail(strict=True)` 用例。**修好后该用例会 XPASS 并失败**，届时删掉 `xfail` 标记即可。
+
+### 9.5 门禁与流水线
+
+GitLab CI 四阶段：`test → quality → build → deploy`。测试或覆盖率不达标会阻断后续构建与部署。
+
+SonarQube 的门禁只卡**新增代码**覆盖率 ≥80%，不要求全项目达标。因此开发新功能时，**保证新代码自带测试**即可，不必为提升总覆盖率而补测试。
+
+覆盖率报告路径必须与 SonarQube 的索引路径一致，否则平台会显示 0%：这正是 `.coveragerc` 使用 `source = .` 和 `relative_files = True` 的原因，**不要改成 `--cov=backend/app`**。
+
