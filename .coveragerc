@@ -1,0 +1,33 @@
+# Coverage.py 配置。
+#
+# 关键点:source = .(仓库根)
+# SonarQube 需要报告里的路径与它自己分析的源码路径一致。若用 --cov=backend/app,
+# Coverage 会把文件名写成相对该目录的短路径(main.py)并把 sources 设为 backend/app,
+# SonarQube 解析不到对应文件,平台上覆盖率会显示为 0。
+# 设为仓库根后,文件名是 backend/app/main.py,与扫描路径一致。
+#
+# 统计范围因此需要显式收窄到后端业务代码:source=. 会包含前端等目录。
+# 排除范围与 sonar-project.properties 的 sonar.inclusions 保持一致。
+[run]
+source = .
+relative_files = True
+branch = True
+omit =
+    backend/tests/*
+    conftest.py
+    frontend/*
+    node_modules/*
+    */node_modules/*
+    nginx/*
+    scripts/*
+    deploy/*
+    docs/*
+    backend/.venv/*
+    */__pycache__/*
+
+[report]
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError

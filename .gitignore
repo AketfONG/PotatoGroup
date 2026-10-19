@@ -12,6 +12,10 @@ htmlcov/
 .coverage
 coverage.xml
 
+# CI 测试报告产物(供 SonarQube 消费,不入库)
+coverage-reports/
+xunit-reports/
+
 # ---------- Node ----------
 node_modules/
 frontend/dist/
@@ -32,8 +36,11 @@ pnpm-debug.log*
 *.sqlite3
 
 # ---------- 日志 ----------
+# 本地产物不读不入库(见 AGENTS.md 规则 2)
 *.log
+*.log.*
 logs/
+.dev-logs/
 
 # ---------- IDE / 编辑器 ----------
 .idea/
