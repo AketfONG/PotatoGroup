@@ -31,8 +31,9 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    # 与生产一致:镜像内 uvicorn 监听 80(见 Dockerfile.backend)
     expose:
-      - "8000"
+      - "80"
 
   frontend:
     build:
