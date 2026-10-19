@@ -11,4 +11,4 @@ data:
   APP_ENV: "prod"
   # 前端与后端同域(经 HTTPRoute 统一入口),同源请求本不需要 CORS;
   # 这里填应用域名,便于将来前端单独部署时的跨域调用。
-  CORS_ORIGINS: "https://u-2023012787-potato-messanger.t.secoder.net"
+  CORS_ORIGINS: "https://g-c-potato-messanger.t.secoder.net"

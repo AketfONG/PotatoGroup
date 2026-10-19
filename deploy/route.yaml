@@ -8,10 +8,11 @@ metadata:
 spec:
   # ⚠️ admission 策略强制:hostnames 里的每个值都必须以**本命名空间名**开头
   #    (见 secoder-tmpl/secoder/policy/validate-secoder-route.yaml)。
-  #    命名空间为 u-2023012787,故域名必须以 u-2023012787 开头。
-  #    最终值需与 SECoder 平台分配的命名空间/域名一致后再改这里。
+  #    组队项目部署在组命名空间 g-c(依据:GitLab 分组路径 g2026/g-c,
+  #    小组标识符为 c,集群按 g-<标识符> 生成命名空间)。
+  #    若实际命名空间不同,改为对应前缀;写错会被 admission 直接拒绝。
   hostnames:
-    - u-2023012787-potato-messanger.t.secoder.net
+    - g-c-potato-messanger.t.secoder.net
 
   rules:
     # ---------- 覆盖模板的 /api 规则 ----------
