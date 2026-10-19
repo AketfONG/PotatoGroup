@@ -25,3 +25,18 @@ spec:
             limits:
               cpu: "1"
               memory: 2Gi
+---
+# 补丁:前端 Service 的 selector。
+#
+# ⚠️ 基础模板的 Service **完全没有 selector**,若只依赖 manifests/frontend/
+#    kustomization.yaml 里的 labels 变换,pod 与 Service 的匹配依赖该变换是否
+#    生效。这里显式再补一次,双保险:Kustomize 的实测结果是 labels 变换
+#    在 Service 缺失 selector 时会补上,两处一致不冲突。
+#    若这里与上面的标签不一致,Service 会选不到 Pod,页面直接打不开。
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+spec:
+  selector:
+    app.kubernetes.io/component: frontend

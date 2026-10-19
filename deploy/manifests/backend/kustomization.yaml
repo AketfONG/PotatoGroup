@@ -1,0 +1,16 @@
+# 后端:StatefulSet(需持久化 SQLite,故用 StatefulSet)+ 两个 Service。
+#
+# 端口约定(与课程基础模板一致,勿改):
+#   容器监听 8000?否 —— 本项目的后端镜像监听 **80**(见 deploy/backend/Dockerfile),
+#   容器端口名必须叫 http,Service 的 targetPort 用这个名字解析。
+#
+# 注意:基础模板的 Service **没有 selector**,必须由下面的 labels 变换补上,
+# 否则 Service 的 Endpoints 为空,请求会 503。
+resources:
+  - statefulset.yaml
+  - service.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/component: backend
+    includeSelectors: true
+    includeTemplates: true

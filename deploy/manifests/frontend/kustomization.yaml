@@ -1,0 +1,12 @@
+# 前端:Deployment + Service。
+#
+# 注意:基础模板的 Service **没有 selector**,必须由下面的 labels 变换补上,
+# 否则 Service 的 Endpoints 为空,页面会打不开。
+resources:
+  - deployment.yaml
+  - service.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/component: frontend
+    includeSelectors: true
+    includeTemplates: true

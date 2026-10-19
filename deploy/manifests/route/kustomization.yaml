@@ -1,0 +1,12 @@
+# 路由层:单个 HTTPRoute,负责把外部域名映射到前后端 Service。
+#
+# allowNameChange:true 让补丁可以把资源名从 route 改为 potato-route
+# (否则与基础资源同名会冲突)。
+resources:
+  - http.yaml
+patches:
+  - path: patch.yaml
+    options:
+      allowNameChange: true
+    target:
+      kind: HTTPRoute

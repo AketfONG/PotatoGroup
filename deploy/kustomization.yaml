@@ -3,24 +3,32 @@
 # 用法:CI 的 deploy 作业执行 `kubectl apply -k deploy --prune`
 # 本地预览(不改集群):`kubectl kustomize deploy`
 #
-# 结构与课程模板一致:远程引用基础资源 + 4 个补丁。
-# 基础资源自带:Deployment/frontend、StatefulSet/backend、Service/backend
-# (port 80 → targetPort http)、Service/frontend(port 80)、
-# HTTPRoute/route(只有 parentRefs,hostname 由 route.yaml 补)。
+# ⚠️ 为什么基础清单是**内联**的(而不是像课程文档那样远程引用):
+#   课程模板用 `git@github.com:THUSE-Course/secoder-tmpl.git/...`,
+#   但 `alpine/k8s` 镜像里**没有 ssh**,报错 `cannot run ssh: No such file or directory`;
+#   改成 https 形式又会被网络阻断(`Failed to connect to github.com:443`)。
+#   因此把基础清单固化在 deploy/manifests/ 下,部署不再依赖外部网络。
+#   来源:https://github.com/THUSE-Course/secoder-tmpl 的 deploy/basic/ 与 deploy/route/。
 #
-# 注意:课程模板用 git@github.com:... 的 SSH 形式。若 CI Runner 无法解析该地址,
-# 可改为 https 形式:https://github.com/THUSE-Course/secoder-tmpl.git/deploy/basic/
+# 目录结构:
+#   manifests/backend/   StatefulSet + Service(含 labels 变换补 Service selector)
+#   manifests/frontend/  Deployment + Service(同上)
+#   manifests/route/     HTTPRoute
+#   backend/patch.yaml   覆盖后端镜像、envFrom、探针、资源
+#   frontend/patch.yaml  覆盖前端镜像、资源
+#   pvc.yaml             后端持久化
+#   configmap.yaml       非敏感环境变量
 resources:
-  - git@github.com:THUSE-Course/secoder-tmpl.git/deploy/basic/
+  - manifests/backend
+  - manifests/frontend
+  - manifests/route
   - configmap.yaml
 
 patches:
-  # 补 hostname(admission 强制:必须以本命名空间名开头)
-  - path: route.yaml
-  # 覆盖前端镜像
-  - path: frontend.yaml
   # 覆盖后端镜像、环境变量与探针
-  - path: backend.yaml
+  - path: backend/patch.yaml
+  # 覆盖前端镜像与资源
+  - path: frontend/patch.yaml
   # 后端持久化:挂载 PVC 到 /data(SQLite 数据不能放容器可写层)
   - path: pvc.yaml
 

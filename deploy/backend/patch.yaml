@@ -1,12 +1,18 @@
-# 补丁:后端 StatefulSet(基础资源里的容器名为 backend,监听容器端口 80)。
+# 补丁:后端 StatefulSet。
 #
-# 基础模板的容器端口是 80 且名为 http,Service/backend 用 targetPort: http 解析,
-# 因此**不要改端口名**,后端镜像也必须监听 80(见 Dockerfile 的 uvicorn --port 80)。
+# 容器端口保持基础模板的 80 且名为 http —— Service 的 targetPort: http
+# 依赖这个名字解析,因此**不要改端口名**。
+# 本项目的后端镜像本身监听 80(见 deploy/backend/Dockerfile)。
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: backend
 spec:
+  # 必须显式声明:自 K8s 1.31 起,StatefulSet 若使用 RollingUpdate 策略
+  # (Kustomize 会补上该字段)但缺少 spec.ordinals,API 校验会直接拒绝。
+  # 显式写上可避免这个升级陷阱;显式设置时无需 ordinals。
+  updateStrategy:
+    type: RollingUpdate
   template:
     spec:
       imagePullSecrets:
@@ -22,7 +28,7 @@ spec:
                 name: potato-config
             - secretRef:
                 name: potato-secret
-          # 健康检查使用统一响应包络接口,返回 code=0 即视为可服务
+          # 健康检查走统一响应包络接口,返回 code=0 即视为可服务
           readinessProbe:
             httpGet:
               path: /api/v1/health
@@ -36,7 +42,7 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 20
           resources:
-            # 后端略低于前端(模板注释口径:后端 100Mi)
+            # 后端略低于前端(基础模板注释口径:后端 100Mi)
             requests:
               cpu: 50m
               memory: 100Mi

@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            # u-* namespace quota total: requests 128m CPU / 256Mi memory,
+            # limits 2 CPU / 4Gi memory. This basic template splits the
+            # limit budget evenly with backend and keeps total requests below
+            # the namespace request quota.
+            # g-* namespace quota total: requests 256m CPU / 512Mi memory,
+            # limits 8 CPU / 16Gi memory.
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
