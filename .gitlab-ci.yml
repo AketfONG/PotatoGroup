@@ -18,7 +18,7 @@ stages:
 # ============================================================
 unit-test:
   stage: test
-  # 与生产镜像 deploy/Dockerfile.backend 的 python:3.11-slim 保持一致。
+  # 与生产镜像 deploy/backend/Dockerfile 的 python:3.11-slim 保持一致。
   # 本地开发用的 3.13 不代表 CI 通过。
   image: python:3.11-slim
   variables:
@@ -115,6 +115,16 @@ sonarqube-check:
       EOF
   script:
     - |
+      set -eu
+      # BuildKit 的 dockerfile.v0 前端只会读 <BUILDKIT_DOCKERFILE_DIR>/Dockerfile。
+      # 提前校验,避免出错时报 "failed to read dockerfile: open Dockerfile" 这种
+      # 看不出是哪个目录的隐晦错误。
+      : "${BUILDKIT_DOCKERFILE_DIR:?BUILDKIT_DOCKERFILE_DIR is required}"
+      if [ ! -f "${BUILDKIT_DOCKERFILE_DIR}/Dockerfile" ]; then
+        echo "错误:找不到 ${BUILDKIT_DOCKERFILE_DIR}/Dockerfile"
+        echo "BuildKit 只认该目录下名为 Dockerfile 的文件,请检查路径。"
+        exit 1
+      fi
       buildctl-daemonless.sh build \
         --frontend "${BUILDKIT_FRONTEND}" \
         --local context="${BUILDKIT_CONTEXT}" \
@@ -129,7 +139,9 @@ build-backend:
   extends: .buildkit
   variables:
     BUILDKIT_CONTEXT: .
-    BUILDKIT_DOCKERFILE_DIR: deploy
+    # BuildKit 的 dockerfile.v0 前端只会在该目录下找名为 Dockerfile 的文件,
+    # 因此每个镜像各自放一个目录(目录里只有一个 Dockerfile)。
+    BUILDKIT_DOCKERFILE_DIR: deploy/backend
     BUILDKIT_IMAGE_NAME: $CI_REGISTRY_IMAGE/backend
     BUILDKIT_IMAGE_TAG: $CI_COMMIT_SHA
     # 前后端分开缓存,避免互相覆盖
@@ -139,7 +151,7 @@ build-frontend:
   extends: .buildkit
   variables:
     BUILDKIT_CONTEXT: .
-    BUILDKIT_DOCKERFILE_DIR: deploy
+    BUILDKIT_DOCKERFILE_DIR: deploy/frontend
     BUILDKIT_IMAGE_NAME: $CI_REGISTRY_IMAGE/frontend
     BUILDKIT_IMAGE_TAG: $CI_COMMIT_SHA
     BUILDKIT_CACHE_REF: $CI_REGISTRY_IMAGE/frontend:buildcache

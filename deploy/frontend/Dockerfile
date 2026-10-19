@@ -1,4 +1,5 @@
-# 前端镜像:Node 构建 → Nginx 托管并反代后端
+# 前端镜像:Node 构建 → Nginx 托管静态资源
+# 构建上下文为**仓库根目录**;CI 侧 BUILDKIT_DOCKERFILE_DIR=deploy/frontend。
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./

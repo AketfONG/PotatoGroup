@@ -21,7 +21,7 @@ services:
   backend:
     build:
       context: ..
-      dockerfile: deploy/Dockerfile.backend
+      dockerfile: deploy/backend/Dockerfile
     environment:
       DATABASE_URL: mysql+pymysql://potato:potato_pass@mysql:3306/potato?charset=utf8mb4
       JWT_SECRET: ${JWT_SECRET:-please-change-me-in-production-0123456789}
@@ -31,14 +31,14 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-    # 与生产一致:镜像内 uvicorn 监听 80(见 Dockerfile.backend)
+    # 与生产一致:镜像内 uvicorn 监听 80(见 deploy/backend/Dockerfile)
     expose:
       - "80"
 
   frontend:
     build:
       context: ..
-      dockerfile: deploy/Dockerfile.frontend
+      dockerfile: deploy/frontend/Dockerfile
     depends_on:
       - backend
     ports:

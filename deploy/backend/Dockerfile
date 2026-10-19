@@ -2,7 +2,9 @@
 #
 # 按课程《后端部署》手册的要求:
 #   Python 3.11 / WORKDIR /app / 使用 SECoder PyPI 镜像 / 监听 80 端口 / 由 start.sh 启动
-# 构建上下文为**仓库根目录**(CI: BUILDKIT_CONTEXT=. 、BUILDKIT_DOCKERFILE_DIR=deploy)。
+# 构建上下文为**仓库根目录**。
+# CI 侧:BUILDKIT_CONTEXT=. 、BUILDKIT_DOCKERFILE_DIR=deploy/backend
+# (BuildKit 只读该目录下名为 Dockerfile 的文件,故前后端各占一个目录)。
 FROM python:3.11-slim
 
 WORKDIR /app
