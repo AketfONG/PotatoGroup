@@ -71,7 +71,9 @@ export class WsClient {
   }
 
   private async handleEvent(event: WsEvent): Promise<void> {
-    if (event.type === 'message.new' || event.type === 'message.recall') {
+    // 这三个事件都会占用用户链一个 seq,必须做同样的连续性校验:
+    // 漏掉 read.sync 会让已读上报把本地 cursor 打断,之后每条推送都误判为"有缺口"。
+    if (event.type === 'message.new' || event.type === 'message.recall' || event.type === 'read.sync') {
       const { prev_seq, seq } = event
       // 首条消息 prev_seq 为 0;之后必须严格衔接本地 cursor
       if (this.localSeq !== 0 && prev_seq !== this.localSeq) {

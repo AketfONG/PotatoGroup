@@ -184,8 +184,80 @@ def mark_read(db: Session, member: ConversationMember, read_index: int) -> ReadS
     )
 
 
+def delete_message_for_me(
+    db: Session,
+    user_id: int,
+    conversation_id: int,
+    msg_id: int,
+) -> dict[str, Any]:
+    """本地删除:只对我生效,历史上不再出现,其他成员不受影响。
+
+    实现为「投递墓碑」:把用户链上那条 `kind="message"` 的记录改写成 `kind="delete"`,
+    并带上 `payload={"msg_id", "conversation_id"}`。这样:
+
+    - 会话历史(`message` 表)靠 tombstone 子查询过滤掉它;
+    - `/sync`(用户链)把该条以 `kind="delete"` 返回,客户端据此从本地移除,
+      离线端下次补拉同样能拿到这个删除,**不会再出现「历史里复活」**;
+    - 未读数不计入已删消息。
+
+    若我此前没有投递过这条消息(例如它是入群前的历史消息),则补写一条墓碑,
+    保证历史与同步两处口径一致。
+
+    返回 `prev_seq`/`seq`/`data`,供路由向本用户其他端推送 `message.delete`(多端同步)。
+    """
+    now = _now()
+    prev_seq = last_seq_of_user(db, user_id)
+    row = db.scalar(
+        select(InboxMessage).where(
+            InboxMessage.user_id == user_id,
+            InboxMessage.msg_id == msg_id,
+            InboxMessage.kind.in_(("message", "delete")),
+        )
+    )
+    if row is None:
+        # 该消息没有我的投递记录(入群前历史等):补写墓碑,payload 兼作判定依据
+        row = InboxMessage(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            msg_id=msg_id,
+            kind="delete",
+            payload=_delete_payload(conversation_id, msg_id),
+            create_time=now,
+        )
+        db.add(row)
+    else:
+        row.kind = "delete"
+        row.payload = _delete_payload(conversation_id, msg_id)
+    db.flush()  # 必须先取到 row.id:新建墓碑时它此刻还是 None,不能拿去和 read_index 比较
+
+    # 已读位置可能落在这条之后。留着它会让单调约束把客户端后续的合法上报判为「回退」,
+    # 所以把已读位置压到被删消息之前(不会增加未读数:被删消息本身已不计入)。
+    member = db.scalar(
+        select(ConversationMember).where(
+            ConversationMember.conversation_id == conversation_id,
+            ConversationMember.member_user_id == user_id,
+        )
+    )
+    if member is not None and row.id is not None and member.read_index > row.id:
+        member.read_index = row.id
+        member.update_time = now
+
+    event = {
+        "type": "message.delete",
+        "seq": row.id,
+        "prev_seq": prev_seq,
+        "data": _delete_payload(conversation_id, msg_id),
+    }
+    db.commit()
+    return event
+
+
 def unread_count(db: Session, user_id: int, conversation_id: int, read_index: int) -> int:
-    """未读数 = 用户链上该会话中 seq > read_index 的普通消息条数。"""
+    """未读数 = 用户链上该会话中 seq > read_index、且未被我删除的普通消息条数。
+
+    已删除的消息用 `kind="delete"` 墓碑标记,这里必须一起排除,否则会出现
+    「历史里已经看不到、未读数却还算着它」的口径矛盾。
+    """
     return int(
         db.scalar(
             select(func.count(InboxMessage.id)).where(
@@ -193,6 +265,7 @@ def unread_count(db: Session, user_id: int, conversation_id: int, read_index: in
                 InboxMessage.conversation_id == conversation_id,
                 InboxMessage.id > read_index,
                 InboxMessage.kind == "message",
+                InboxMessage.msg_id.not_in(deleted_msg_ids(user_id)),
             )
         )
         or 0
