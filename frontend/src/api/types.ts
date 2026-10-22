@@ -98,6 +98,11 @@ export interface Message {
   body: string
   reply_to: number | null
   create_time: number
+  /**
+   * 该消息在「我的」用户链上的 seq,仅会话历史会返回。
+   * 上报已读时必须用它作为 read_index —— 不能用 msg_id(全局 ID ≠ 我的 seq)。
+   */
+  seq?: number
 }
 
 export interface ConversationItem {
@@ -154,8 +159,19 @@ export interface WsMessageRecallEvent {
   data: { msg_id: number; conversation_id: number }
 }
 
+/** 本端多设备同步删除:我在某设备本地删除了一条消息 */
+export interface WsMessageDeleteEvent {
+  type: 'message.delete'
+  seq: number
+  prev_seq: number
+  data: { msg_id: number; conversation_id: number }
+}
+
 export interface WsReadSyncEvent {
   type: 'read.sync'
+  /** 本次已读上报占用的用户链 seq;与 message.new 同一套连续性校验 */
+  seq: number
+  prev_seq: number
   data: { conversation_id: number; read_index: number }
 }
 
@@ -172,6 +188,7 @@ export interface WsConversationUpdateEvent {
 export type WsEvent =
   | WsMessageNewEvent
   | WsMessageRecallEvent
+  | WsMessageDeleteEvent
   | WsReadSyncEvent
   | WsFriendRequestEvent
   | WsConversationUpdateEvent

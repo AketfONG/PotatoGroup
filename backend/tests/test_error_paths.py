@@ -288,6 +288,25 @@ def test_read_index_negative_rejected(client, conv, pair):
     assert resp.json()["code"] == 1001
 
 
+def test_read_index_beyond_my_chain_rejected(client, conv, pair):
+    """已读位置超过我的用户链最新 seq 时拒绝(块 A 的上限校验,不截断)。
+
+    伪造一个很大的 read_index 若被接受,会把未读一次性清零;而调用方只可能读到
+    确实投递给它的条目,越界必然是客户端状态异常或伪造。
+    """
+    ta, _, _, _ = pair
+    resp = client.post(f"/api/v1/conversations/{conv}/read", json={"read_index": 999999999}, headers=_auth(ta))
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["code"] == 1001
+
+
+def test_read_index_zero_on_empty_chain_accepted(client, conv, pair):
+    """全新会话(我的用户链为空)上报 0 是合法的:0 表示「一条都还没读」。"""
+    ta, _, _, _ = pair
+    resp = client.post(f"/api/v1/conversations/{conv}/read", json={"read_index": 0}, headers=_auth(ta))
+    assert resp.json()["code"] == 0, resp.text
+
+
 def test_recall_other_users_message_forbidden(client, conv, pair):
     """不能撤回别人发的消息。"""
     ta, _, tb, _ = pair
@@ -314,9 +333,19 @@ def test_sync_returns_read_command_payload(client, pair, conv):
     """用户链里的 read 记录应带 payload 返回,而不是被当成消息去查 message 表。
 
     这条专门覆盖 sync.py 中 kind != "message" 的分支。
+
+    注意两点(块 A 语义):
+    1. read_index 不得超过我的用户链最新 seq,所以要用**对方发来的**那条的 seq 上报;
+    2. 发送方自己的已读位置在发消息时就已推进到该条,因此不能拿自己发的消息来上报。
     """
-    ta, _, _, _ = pair
-    assert client.post(f"/api/v1/conversations/{conv}/read", json={"read_index": 1}, headers=_auth(ta)).json()["code"] == 0
+    ta, _, tb, _ = pair
+    assert client.post(f"/api/v1/conversations/{conv}/messages", json={"body": "先来一条"}, headers=_auth(ta)).json()["code"] == 0
+    incoming = client.post(f"/api/v1/conversations/{conv}/messages", json={"body": "对方回一条"}, headers=_auth(tb)).json()
+    assert incoming["code"] == 0, incoming
+
+    my_seq = client.get("/api/v1/sync?cursor=0&limit=100", headers=_auth(ta)).json()["data"]["items"]
+    read_index = max(it["seq"] for it in my_seq if it["conversation_id"] == conv)
+    assert client.post(f"/api/v1/conversations/{conv}/read", json={"read_index": read_index}, headers=_auth(ta)).json()["code"] == 0
 
     resp = client.get("/api/v1/sync?cursor=0", headers=_auth(ta))
     assert resp.status_code == 200
@@ -329,7 +358,7 @@ def test_sync_returns_read_command_payload(client, pair, conv):
     item = read_items[-1]
     assert item["data"] is not None, "read 记录应带 payload"
     assert item["data"]["conversation_id"] == conv
-    assert item["data"]["read_index"] == 1
+    assert item["data"]["read_index"] == read_index
 
 
 # ---------- 会话:建群与权限 ----------

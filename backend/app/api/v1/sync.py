@@ -12,6 +12,7 @@ from app.core.deps import get_current_user, get_db
 from app.models import InboxMessage, Message, User
 from app.schemas.common import ApiResponse, ok
 from app.schemas.message import SyncItemOut, SyncOut
+from app.services import message_service
 
 router = APIRouter(prefix="/sync", tags=["同步"])
 
@@ -26,11 +27,23 @@ async def sync(
     """增量拉取我的用户链:首次登录 cursor=0 全量;离线补拉 cursor=本地最后 seq。
 
     条目语义:kind=message 为普通消息;kind=recall/read/delete 为命令消息(前端据此更新本地状态)。
+
+    我已经删除的消息不会再以 kind="message" 回来(与历史查询同一口径);删除本身由
+    kind="delete" 命令消息表达,`data` 带 `{msg_id, conversation_id}`。删除后重写的墓碑行
+    沿用原 seq,故不会因为过滤而让 cursor 出现空洞。
     """
     rows = list(
         db.scalars(
             select(InboxMessage)
-            .where(InboxMessage.user_id == me.user_id, InboxMessage.id > cursor)
+            .where(
+                InboxMessage.user_id == me.user_id,
+                InboxMessage.id > cursor,
+                # 已删除的投递记录不再当作新消息下发(墓碑行会另行返回)
+                ~(
+                    (InboxMessage.kind == "message")
+                    & InboxMessage.msg_id.in_(message_service.deleted_msg_ids(me.user_id))
+                ),
+            )
             .order_by(InboxMessage.id.asc())
             .limit(limit + 1)
         )

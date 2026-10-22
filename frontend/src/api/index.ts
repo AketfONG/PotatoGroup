@@ -121,6 +121,11 @@ export async function recallMessage(conversationId: number, msgId: number): Prom
   await unwrap(http.post(`/conversations/${conversationId}/messages/${msgId}/recall`))
 }
 
+/** 本地删除:只对我生效(服务端写 `kind="delete"` 墓碑),其他成员不受影响 */
+export async function deleteMessage(conversationId: number, msgId: number): Promise<void> {
+  await unwrap(http.delete(`/conversations/${conversationId}/messages/${msgId}`))
+}
+
 export async function sync(cursor: number): Promise<SyncOut> {
   return unwrap<SyncOut>(http.get('/sync', { params: { cursor, limit: 200 } }))
 }

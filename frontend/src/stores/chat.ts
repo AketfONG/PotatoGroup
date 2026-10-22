@@ -63,8 +63,12 @@ export const useChatStore = defineStore('chat', () => {
     const msgs = messagesByConversation.value[conversationId] ?? []
     const latest = msgs[msgs.length - 1]
     if (!latest) return
-    // read_index 以用户链 seq 表示;此处直接后端按最新已读处理(骨架简化,见 docs/02-API约定.md)
-    await api.markRead(conversationId, latest.msg_id).catch(() => undefined)
+    // read_index 必须是「我的用户链 seq」,由历史接口随每条消息返回(history 的 seq 字段)。
+    // 不能用 latest.msg_id:那是全局消息 ID,与服务端 seq 不是一回事,上报会被判越界拒绝
+    // (见 docs/02 第 6 节「已读上报的两条约束」)。
+    const readIndex = latest.seq
+    if (readIndex === undefined) return
+    await api.markRead(conversationId, readIndex)
     const conv = conversations.value.find((c) => c.conversation_id === conversationId)
     if (conv) conv.unread_count = 0
   }
@@ -92,6 +96,12 @@ export const useChatStore = defineStore('chat', () => {
         const list = messagesByConversation.value[conversation_id] ?? []
         const target = list.find((m) => m.msg_id === msg_id)
         if (target) target.body = '[消息已撤回]'
+        break
+      }
+      case 'message.delete': {
+        // 本端多设备同步删除:我在别的设备删了这条,这里也要移除(仅本地,不影响其他成员)
+        const { msg_id, conversation_id } = event.data
+        removeMessage(conversation_id, msg_id)
         break
       }
       case 'read.sync': {
@@ -126,6 +136,19 @@ export const useChatStore = defineStore('chat', () => {
     return [...map.values()].sort((a, b) => a.msg_id - b.msg_id)
   }
 
+  /** 本地移除一条消息(本地删除,或收到 message.delete 多端同步事件) */
+  function removeMessage(conversationId: number, msgId: number): void {
+    const list = messagesByConversation.value[conversationId]
+    if (!list) return
+    messagesByConversation.value[conversationId] = list.filter((m) => m.msg_id !== msgId)
+  }
+
+  /** 本地删除一条消息:先落服务端(仅对我生效),再更新本地列表 */
+  async function deleteMessage(conversationId: number, msgId: number): Promise<void> {
+    await api.deleteMessage(conversationId, msgId)
+    removeMessage(conversationId, msgId)
+  }
+
   // ---------- 连接管理 ----------
 
   async function startSession(): Promise<void> {
@@ -134,6 +157,12 @@ export const useChatStore = defineStore('chat', () => {
     for (const item of initial.items) {
       if (item.kind === 'message' && item.data) {
         upsertMessage(item.data as unknown as Message)
+      } else if (item.kind === 'delete' && item.data) {
+        // 登录补拉时也要应用「我删过的」标记,否则刷新后已删消息会重新出现
+        const payload = item.data as { msg_id?: number; conversation_id?: number }
+        if (payload.msg_id !== undefined && payload.conversation_id !== undefined) {
+          removeMessage(payload.conversation_id, payload.msg_id)
+        }
       }
     }
     wsClient.on(handleEvent)
@@ -156,6 +185,7 @@ export const useChatStore = defineStore('chat', () => {
     openConversation,
     sendMessage,
     clearUnread,
+    deleteMessage,
     handleEvent,
     startSession,
     endSession,

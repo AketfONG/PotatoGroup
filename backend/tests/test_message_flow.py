@@ -292,7 +292,7 @@ def test_reply_to_message(client, pair):
 
 
 def test_delete_message_for_me(client, pair):
-    """本地删除后 /sync 不再返回该条(现有行为)。"""
+    """本地删除:只对我生效,且删除动作本身能被 /sync 表达出来(多端一致)。"""
     ta, ua, tb, ub = pair
     cid = client.post(
         "/api/v1/conversations/private", json={"target_user_id": ub}, headers=_auth(ta)
@@ -305,7 +305,210 @@ def test_delete_message_for_me(client, pair):
     assert resp.json()["code"] == 0
 
     sync = client.get("/api/v1/sync?cursor=0&limit=200", headers=_auth(ta)).json()["data"]["items"]
-    assert not any((it.get("data") or {}).get("msg_id") == mid for it in sync)
+    # 删除后不再以 kind="message" 下发,改由 kind="delete" 墓碑表达
+    assert not any(it["kind"] == "message" and (it.get("data") or {}).get("msg_id") == mid for it in sync)
+    tombstones = [it for it in sync if it["kind"] == "delete"]
+    assert tombstones, f"应能在 /sync 里看到删除标记: {sync}"
+    payload = tombstones[-1]["data"]
+    assert payload["msg_id"] == mid
+    assert payload["conversation_id"] == cid
+
+
+def test_delete_message_is_local_only(client, pair):
+    """本地删除只影响自己:历史、未读、/sync 三处口径一致,对方完全不受影响。"""
+    ta, ua, tb, ub = pair
+    cid = client.post(
+        "/api/v1/conversations/private", json={"target_user_id": ub}, headers=_auth(ta)
+    ).json()["data"]["conversation_id"]
+    keep = client.post(
+        f"/api/v1/conversations/{cid}/messages", json={"body": "保留"}, headers=_auth(ta)
+    ).json()["data"]["msg_id"]
+    doomed = client.post(
+        f"/api/v1/conversations/{cid}/messages", json={"body": "删掉"}, headers=_auth(ta)
+    ).json()["data"]["msg_id"]
+    assert client.delete(f"/api/v1/conversations/{cid}/messages/{doomed}", headers=_auth(tb)).json()["code"] == 0
+
+    # 我的历史:删掉的不在,保留的还在
+    my_history = client.get(f"/api/v1/conversations/{cid}/messages", headers=_auth(tb)).json()["data"]["items"]
+    bodies = [m["body"] for m in my_history]
+    assert "删掉" not in bodies
+    assert "保留" in bodies
+
+    # 我的未读:只算没删的那条
+    items = client.get("/api/v1/conversations", headers=_auth(tb)).json()["data"]["items"]
+    mine = next(c for c in items if c["conversation_id"] == cid)
+    assert mine["unread_count"] == 1
+
+    # 发送方视角:两条都在,未读不受影响
+    ta_history = client.get(f"/api/v1/conversations/{cid}/messages", headers=_auth(ta)).json()["data"]["items"]
+    assert {m["msg_id"] for m in ta_history} == {keep, doomed}
+    ta_sync = client.get("/api/v1/sync?cursor=0&limit=200", headers=_auth(ta)).json()["data"]["items"]
+    assert not any(it["kind"] == "delete" for it in ta_sync)
+
+
+def test_delete_message_twice_is_idempotent(client, pair):
+    """重复删除不报错,也不重复写墓碑。"""
+    ta, ua, tb, ub = pair
+    cid = client.post(
+        "/api/v1/conversations/private", json={"target_user_id": ub}, headers=_auth(ta)
+    ).json()["data"]["conversation_id"]
+    mid = client.post(
+        f"/api/v1/conversations/{cid}/messages", json={"body": "删两次"}, headers=_auth(ta)
+    ).json()["data"]["msg_id"]
+
+    assert client.delete(f"/api/v1/conversations/{cid}/messages/{mid}", headers=_auth(ta)).json()["code"] == 0
+    assert client.delete(f"/api/v1/conversations/{cid}/messages/{mid}", headers=_auth(ta)).json()["code"] == 0
+
+    sync = client.get("/api/v1/sync?cursor=0&limit=200", headers=_auth(ta)).json()["data"]["items"]
+    assert len([it for it in sync if it["kind"] == "delete"]) == 1
+
+
+def test_delete_message_clamps_read_index(client, pair):
+    """删除排在已读位置之前的消息时,已读位置被回压到它之前,未读不受影响。
+
+    构造要点(踩过两个坑,记下来):
+    - 单聊会话按「用户对」去重,换个人建私聊会拿到同一个 conversation,不能用来制造
+      「另一个会话里更靠后的 seq」;
+    - 发送方自己的已读位置在发消息时就推进到该条,所以必须用**对方发来的**消息把已读位置抬高。
+
+    于是构造为:ta 先发两条,我读掉(已读位置 = 第二条)-> ta 再发第三条(我未读 1 条)
+    -> 我删除第一条(排在已读位置之前)。此时若不回压,已读位置会留在一个已变成墓碑的 seq 上。
+    """
+    ta, ua, tb, ub = pair
+    cid = client.post(
+        "/api/v1/conversations/private", json={"target_user_id": ub}, headers=_auth(ta)
+    ).json()["data"]["conversation_id"]
+    ids = [
+        client.post(f"/api/v1/conversations/{cid}/messages", json={"body": f"m{i}"}, headers=_auth(ta)).json()["data"]["msg_id"]
+        for i in range(2)
+    ]
+
+    first_two = client.get(f"/api/v1/conversations/{cid}/messages", headers=_auth(tb)).json()["data"]["items"]
+    read_to = max(m["seq"] for m in first_two)
+    assert client.post(
+        f"/api/v1/conversations/{cid}/read", json={"read_index": read_to}, headers=_auth(tb)
+    ).json()["code"] == 0
+
+    ids.append(
+        client.post(f"/api/v1/conversations/{cid}/messages", json={"body": "m2"}, headers=_auth(ta)).json()["data"]["msg_id"]
+    )
+
+    convs = client.get("/api/v1/conversations", headers=_auth(tb)).json()["data"]["items"]
+    assert next(c for c in convs if c["conversation_id"] == cid)["unread_count"] == 1
+
+    # 删掉最早那条:它的 seq 排在已读位置之前
+    assert client.delete(f"/api/v1/conversations/{cid}/messages/{ids[0]}", headers=_auth(tb)).json()["code"] == 0
+
+    from sqlalchemy import select
+
+    from app.db.base import SessionLocal
+    from app.models import ConversationMember
+
+    with SessionLocal() as db:
+        member = db.scalar(
+            select(ConversationMember).where(
+                ConversationMember.conversation_id == cid,
+                ConversationMember.member_user_id == ub,
+            )
+        )
+    assert member is not None
+    assert member.read_index < read_to, f"已读位置应被回压,实际 {member.read_index}"
+
+    # 回压的代价:第二条也会重新变成「未读」(未读数 1 -> 2)。这是刻意选的保守方向 ——
+    # 多算一条未读只是界面多一个红点,而少算一条会让人漏看消息。
+    convs = client.get("/api/v1/conversations", headers=_auth(tb)).json()["data"]["items"]
+    assert next(c for c in convs if c["conversation_id"] == cid)["unread_count"] == 2
+
+    # 历史里第一条已消失,其余两条仍在
+    remaining = client.get(f"/api/v1/conversations/{cid}/messages", headers=_auth(tb)).json()["data"]["items"]
+    assert sorted(m["msg_id"] for m in remaining) == sorted(ids[1:])
+
+
+def test_delete_message_without_my_delivery_row(client, pair):
+    """删除一条我没有投递记录的消息(入群前历史):补写墓碑,不报错。
+
+    这是一条真实的边界:群成员的投递行只在「成为成员之后」才产生,所以新成员去删除
+    入群前的历史消息时,用户链上根本没有对应记录,必须补墓碑才能让历史与 /sync 口径一致。
+    """
+    ta, ua, tb, ub = pair
+    # ta 先建群(此时只有 ta 与 ub)
+    group = client.post(
+        "/api/v1/conversations", json={"name": "历史群", "member_ids": [ub]}, headers=_auth(ta)
+    ).json()["data"]["conversation_id"]
+    # 群主在「新成员入群前」发一条,这条不会投递给后来者
+    early = client.post(
+        f"/api/v1/conversations/{group}/messages", json={"body": "入群前的消息"}, headers=_auth(ta)
+    ).json()["data"]["msg_id"]
+
+    tc, uc = _register(client, "flow_latecomer")
+    _be_friends(client, ta, tc, ua, uc)  # 拉人前必须是好友
+    client.post(f"/api/v1/conversations/{group}/members", json={"user_ids": [uc]}, headers=_auth(ta))
+
+    # 新成员删除这条自己并没有投递记录的消息:应成功,并留下墓碑
+    resp = client.delete(f"/api/v1/conversations/{group}/messages/{early}", headers=_auth(tc))
+    assert resp.json()["code"] == 0, resp.text
+
+    sync = client.get("/api/v1/sync?cursor=0&limit=200", headers=_auth(tc)).json()["data"]["items"]
+    tombstones = [it for it in sync if it["kind"] == "delete"]
+    assert [it["data"]["msg_id"] for it in tombstones] == [early]
+
+    # 之后我仍然能正常上报已读(墓碑不会把已读位置卡死)
+    assert client.post(
+        f"/api/v1/conversations/{group}/read", json={"read_index": 0}, headers=_auth(tc)
+    ).json()["code"] == 0
+
+
+def test_history_carries_my_seq_for_read_report(client, pair):
+    """历史里每条消息带上「我的 seq」,客户端据此上报已读(不能用 msg_id)。"""
+    ta, ua, tb, ub = pair
+    cid = client.post(
+        "/api/v1/conversations/private", json={"target_user_id": ub}, headers=_auth(ta)
+    ).json()["data"]["conversation_id"]
+    sent = [
+        client.post(f"/api/v1/conversations/{cid}/messages", json={"body": f"h{i}"}, headers=_auth(ta)).json()["data"]
+        for i in range(3)
+    ]
+
+    items = client.get(f"/api/v1/conversations/{cid}/messages", headers=_auth(tb)).json()["data"]["items"]
+    assert len(items) == 3
+    for m in items:
+        # seq 必须是「我的」用户链序号,与全局 msg_id 是两套编号
+        assert m["seq"] is not None
+        assert m["msg_id"] in {s["msg_id"] for s in sent}
+
+    # 用历史里的 seq 上报已读,未读应清零(这条正是前端 clearUnread 的路径)
+    max_seq = max(m["seq"] for m in items)
+    assert client.post(
+        f"/api/v1/conversations/{cid}/read", json={"read_index": max_seq}, headers=_auth(tb)
+    ).json()["code"] == 0
+    items_after = client.get("/api/v1/conversations", headers=_auth(tb)).json()["data"]["items"]
+    assert next(c for c in items_after if c["conversation_id"] == cid)["unread_count"] == 0
+
+
+def test_read_index_is_monotonic(client, pair):
+    """已读位置只前进:较小的旧值乱序到达时被忽略,接口仍返回成功。"""
+    ta, ua, tb, ub = pair
+    cid = client.post(
+        "/api/v1/conversations/private", json={"target_user_id": ub}, headers=_auth(ta)
+    ).json()["data"]["conversation_id"]
+    for i in range(3):
+        client.post(f"/api/v1/conversations/{cid}/messages", json={"body": f"m{i}"}, headers=_auth(ta))
+
+    sync = client.get("/api/v1/sync?cursor=0&limit=200", headers=_auth(tb)).json()["data"]["items"]
+    seqs = sorted(it["seq"] for it in sync if it["conversation_id"] == cid)
+    assert client.post(f"/api/v1/conversations/{cid}/read", json={"read_index": seqs[-1]}, headers=_auth(tb)).json()["code"] == 0
+
+    # 迟到的旧请求:不报错,但已读位置不得回退
+    resp = client.post(f"/api/v1/conversations/{cid}/read", json={"read_index": seqs[0]}, headers=_auth(tb))
+    assert resp.json()["code"] == 0
+
+    after = client.get("/api/v1/sync?cursor=0&limit=200", headers=_auth(tb)).json()["data"]["items"]
+    read_indexes = [it["data"]["read_index"] for it in after if it["kind"] == "read"]
+    assert read_indexes == [seqs[-1]], f"不应为回退的旧值再写一条 read 记录: {read_indexes}"
+
+    # 未读仍为 0:回退没有生效
+    items = client.get("/api/v1/conversations", headers=_auth(tb)).json()["data"]["items"]
+    assert next(c for c in items if c["conversation_id"] == cid)["unread_count"] == 0
 
 
 # ---------- 会话列表 ----------

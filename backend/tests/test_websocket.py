@@ -285,6 +285,60 @@ def test_recall_pushes_to_recipient(client, pair):
     assert "seq" in event and "prev_seq" in event
 
 
+def test_read_report_pushes_read_sync_with_seq(client, pair):
+    """上报已读要占用用户链一个 seq 并推送 read.sync,否则客户端游标会被打断。
+
+    块 A(A3):read.sync 此前不带 seq/prev_seq,客户端无法做连续性校验 ——
+    一旦本地 cursor 停在别的条目上,后续每条推送都会被误判成「有缺口」而反复补拉。
+    """
+    ta, _ua, tb, _ub = pair
+    cid = _private_conversation(client, ta, _ub)
+
+    with client.websocket_connect(f"{WS_PATH}?token={tb}") as ws:
+        ws.receive_json()  # connected
+        sent = _send(client, cid, ta, "读我")
+        new_event = ws.receive_json()  # message.new
+        assert new_event["data"]["msg_id"] == sent["msg_id"]
+
+        resp = client.post(
+            f"/api/v1/conversations/{cid}/read",
+            json={"read_index": new_event["seq"]},
+            headers=_auth(tb),
+        )
+        assert resp.json()["code"] == 0, resp.text
+        event = ws.receive_json()
+
+    assert event["type"] == "read.sync"
+    assert event["data"] == {"conversation_id": cid, "read_index": new_event["seq"]}
+    # 本次已读条目自身的 seq 必须衔接上一条,客户端据此推进 cursor
+    assert event["prev_seq"] == new_event["seq"]
+    assert event["seq"] > event["prev_seq"]
+
+
+def test_local_delete_pushes_message_delete_to_my_other_devices(client, pair):
+    """本地删除要推给同一账号的其他端(多端一致),且不推给会话里的其他人。"""
+    ta, _ua, tb, _ub = pair
+    cid = _private_conversation(client, ta, _ub)
+
+    with client.websocket_connect(f"{WS_PATH}?token={tb}") as ws_old:
+        ws_old.receive_json()  # connected:老设备
+        sent = _send(client, cid, ta, "这台设备要删")
+        ws_old.receive_json()  # message.new
+
+        # 新设备(另一条连接)执行本地删除
+        with client.websocket_connect(f"{WS_PATH}?token={tb}") as ws_new:
+            ws_new.receive_json()  # connected
+            resp = client.delete(
+                f"/api/v1/conversations/{cid}/messages/{sent['msg_id']}", headers=_auth(tb)
+            )
+            assert resp.json()["code"] == 0, resp.text
+            event = ws_old.receive_json()
+
+    assert event["type"] == "message.delete"
+    assert event["data"] == {"msg_id": sent["msg_id"], "conversation_id": cid}
+    assert "seq" in event and "prev_seq" in event
+
+
 # ---------- 推送失败与批量推送(连接管理器直接行为) ----------
 
 

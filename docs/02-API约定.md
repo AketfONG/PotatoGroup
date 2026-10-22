@@ -131,12 +131,27 @@ HTTP 状态码与业务错误码双层设计:HTTP 表达传输/鉴权层错误,`
 | POST | `/api/v1/conversations/{id}/messages` | 发送文本消息 `{ "body": "你好", "reply_to": null }`(可以是已读回执/撤回前的消息) | `Message` |
 | GET | `/api/v1/conversations/{id}/messages?cursor=&limit=&sender_id=&start_time=&end_time=` | 会话历史(按时间游标翻页,可按发送者/时间段过滤;**新成员可拉取入群前历史**) | `{ "items": [Message], "next_cursor": int|null }` |
 | POST | `/api/v1/conversations/{id}/messages/{msg_id}/recall` | 撤回(仅发送者本人,2 分钟内;实现为向用户链投递命令消息) | `null` |
-| DELETE | `/api/v1/conversations/{id}/messages/{msg_id}` | 本地删除(仅自己的用户链中移除) | `null` |
-| POST | `/api/v1/conversations/{id}/read` | 上报已读 `{ "read_index": 42 }`(更新 conversation_member.read_index) | `null` |
+| DELETE | `/api/v1/conversations/{id}/messages/{msg_id}` | 本地删除(仅对我生效:写入 `kind="delete"` 墓碑,历史与 `/sync` 同时过滤;重复删除幂等) | `null` |
+| POST | `/api/v1/conversations/{id}/read` | 上报已读 `{ "read_index": 42 }`(**单调**推进且**不得超过**我的用户链最新 seq;见下方约束) | `null` |
 | GET | `/api/v1/sync?cursor=&limit=` | **兜底拉取**:拉取我的用户链上 cursor 之后的消息(离线补拉/断线补拉) | `{ "items": [Message], "next_cursor": int|null }` |
 
 **Message**:`{ msg_id, conversation_id, sender_id, body, reply_to, create_time, seq }`
-其中 `seq` 为该消息在**我的用户链**中的序号(全局递增),`cursor` 一致性校验以 `seq` 为准。
+其中 `seq` 为该消息在**我的用户链**中的序号,`cursor` 一致性校验以 `seq` 为准。
+`seq` 仅由**会话历史**返回(发送接口与推送另有其自身的 `seq` 字段);`msg_id` 是全局消息标识,
+与我的 `seq` 不是一回事,**不得**拿 `msg_id` 当作 `read_index` 上报。
+
+**已读上报的两条约束**(服务端强制,契约要求客户端遵守):
+
+1. **单调**:`read_index` 小于当前值时视为旧请求乱序到达 —— 不改动服务端状态,接口仍返回成功
+   (与最新已读状态一致),不报错;
+2. **有上限**:`read_index` 不得超过该用户用户链的最新 `seq`。调用方只可能读到确实投递给它的
+   条目,越界即客户端状态异常或伪造,服务端返回 `400 / 1001` 拒绝,**不做截断**。
+
+正确做法:从**历史查询**返回的 `Message.seq` 里取当前可见的最后一条,用它上报。
+
+**删除语义**:本地删除对**其他成员无影响**;被删消息不再出现在会话历史里,`/sync` 会以
+`kind="delete"` 条目表达该删除(见第 7 节),因此离线设备补拉后也能清掉本地缓存,
+不会出现「刷新后消息复活」。
 
 ### 消息分发模型(与需求文档一致)
 
@@ -158,12 +173,14 @@ HTTP 状态码与业务错误码双层设计:HTTP 表达传输/鉴权层错误,`
 |---|---|---|
 | `message.new` | 新消息(含单聊/群聊) | `Message`;`prev_seq` 为发送方链上上一条消息的 seq,客户端比对本地 cursor,不一致立即调用 `/sync` 补拉 |
 | `message.recall` | 有人撤回消息 | `{ msg_id, conversation_id }` |
-| `message.delete` | 本端多设备同步删除 | `{ msg_id, conversation_id }` |
-| `read.sync` | 其他端上报已读(多端同步) | `{ conversation_id, read_index }` |
+| `message.delete` | **本端多设备同步删除**(我在某设备本地删除了一条消息) | `{ msg_id, conversation_id }`;客户端据 `msg_id` 从本地列表移除 |
+| `read.sync` | 其他端上报已读(多端同步) | `{ conversation_id, read_index }`;与 `message.new` 相同,携带 `seq`/`prev_seq` —— 已读上报会占用用户链一个 seq,客户端必须做同样的连续性校验,否则游标会被 read 条目打断 |
 | `friend.request` | 收到好友申请 | `FriendRequest` |
 | `conversation.update` | 群信息/成员变动 | `Conversation` |
 
 - 客户端上行仅允许 `ping`;业务操作一律走 REST,保证 API 可审计、幂等语义清晰。
+- **连续性校验覆盖的事件**:`message.new`、`message.recall`、`read.sync`(三者都携带 `seq`/`prev_seq`);
+  `prev_seq` 与本地 cursor 不一致即调 `GET /api/v1/sync` 补拉,而不是直接推进 cursor。
 
 ## 8. 安全约定(课程讲义硬性要求)
 

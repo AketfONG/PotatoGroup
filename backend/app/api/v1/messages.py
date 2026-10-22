@@ -6,7 +6,7 @@
 import time
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
@@ -73,7 +73,13 @@ async def conversation_history(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """会话历史:新成员可拉取入群前消息;支持按发送者/时间段过滤。"""
+    """会话历史:新成员可拉取入群前消息;支持按发送者/时间段过滤。
+
+    每条消息附带 `seq`(它在**我的**用户链上的序号),客户端上报已读时用它作为
+    `read_index` —— 不能用 `msg_id`(全局 ID 与我的 seq 不是一回事,见 docs/02 第 6 节)。
+
+    我已经删除的消息不再出现,与 `/sync` 保持同一口径。
+    """
     _require_member(db, conversation_id, me.user_id)
     stmt = select(Message).where(Message.conversation_id == conversation_id)
     if cursor is not None:
@@ -84,9 +90,24 @@ async def conversation_history(
         stmt = stmt.where(Message.create_time >= start_time)
     if end_time is not None:
         stmt = stmt.where(Message.create_time <= end_time)
-    msgs = list(db.scalars(stmt.order_by(Message.msg_id.desc()).limit(limit + 1)))
-    has_more = len(msgs) > limit
-    msgs = msgs[:limit]
+    # 已删除的消息:其用户链记录已被改写成 kind="delete" 墓碑,这里按同一口径排除
+    stmt = stmt.where(
+        Message.msg_id.not_in(message_service.deleted_msg_ids(me.user_id)),
+    )
+    # 顺带取出每条消息在「我」的用户链上的 seq(相关标量子查询,走 (user_id, id) 索引)
+    my_seq = (
+        select(InboxMessage.id)
+        .where(
+            InboxMessage.user_id == me.user_id,
+            InboxMessage.msg_id == Message.msg_id,
+        )
+        .limit(1)
+        .correlate(Message)
+        .scalar_subquery()
+    )
+    rows = list(db.execute(stmt.add_columns(my_seq).order_by(Message.msg_id.desc()).limit(limit + 1)))
+    has_more = len(rows) > limit
+    rows = rows[:limit]
     items = [
         MessageOut(
             msg_id=m.msg_id,
@@ -95,8 +116,9 @@ async def conversation_history(
             body=m.body,
             reply_to=m.reply_to,
             create_time=m.create_time,
+            seq=seq,
         )
-        for m in msgs
+        for m, seq in rows
     ]
     return ok(HistoryOut(items=items, next_cursor=items[-1].msg_id if has_more and items else None))
 
@@ -130,15 +152,21 @@ async def delete_message_for_me(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """本地删除:仅从我的用户链中移除该消息(不影响其他成员)。"""
+    """本地删除:只对我生效,不影响其他成员。
+
+    实现为「投递墓碑」而非物理删行:把我用户链上那条记录改写成 `kind="delete"`。
+    这样历史查询与 `/sync` 口径一致 —— 删掉的消息既不会在历史里复活,也不会被增量同步
+    重新拉回来;离线设备下次补拉时能拿到这条删除标记,从而清掉本地缓存。
+
+    同时向本用户的其他在线端推送 `message.delete`(多端同步)。
+    重复删除是幂等的:已删除时直接返回成功,不重复写墓碑、不重复推送。
+    """
     _require_member(db, conversation_id, me.user_id)
-    db.execute(
-        delete(InboxMessage).where(
-            InboxMessage.user_id == me.user_id,
-            InboxMessage.conversation_id == conversation_id,
-            InboxMessage.msg_id == msg_id,
-            InboxMessage.kind == "message",
-        )
-    )
-    db.commit()
+    msg = db.get(Message, msg_id)
+    if msg is None or msg.conversation_id != conversation_id:
+        raise not_found("消息不存在")
+    event = message_service.delete_message_for_me(db, me.user_id, conversation_id, msg_id)
+    if event is not None:
+        # 事务已提交后再推送
+        await manager.push_to_user(me.user_id, event)
     return ok(None, message="消息已删除")

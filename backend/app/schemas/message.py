@@ -12,6 +12,9 @@ class MessageOut(BaseModel):
     body: str
     reply_to: Optional[int] = None
     create_time: int
+    # 该消息在**当前用户**用户链上的序号(仅历史查询会带)。
+    # 客户端上报已读时必须用它,而不是全局的 msg_id(见 docs/02 第 6 节)。
+    seq: Optional[int] = None
 
 
 class MessageIn(BaseModel):
@@ -31,7 +34,11 @@ class ReadIn(BaseModel):
 
 
 class SyncItemOut(BaseModel):
-    """用户链条目:kind=message 时 data 为消息本体;kind=recall/read/delete 为命令消息。"""
+    """用户链条目:kind=message 时 data 为消息本体;kind=recall/read/delete 为命令消息。
+
+    `kind="delete"` 表示「我在某设备删除的这条消息」,data 带 `{msg_id, conversation_id}`,
+    客户端据此从本地列表移除;这样离线端补拉时也能拿到删除,不会出现历史里复活。
+    """
 
     seq: int
     kind: str
