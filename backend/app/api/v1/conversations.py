@@ -326,25 +326,34 @@ async def mark_read(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """上报已读:更新 read_index,并向我的其他在线端推送 read.sync 实现多端同步。"""
+    """上报已读:推进 read_index,并向我的其他在线端推送 read.sync 实现多端同步。
+
+    两条约束由 `message_service.mark_read` 保证:
+
+    - **单调**:`read_index` 小于当前位置时视为旧请求乱序到达,不更新、不推送,接口仍返回成功
+      (与最新状态一致);
+    - **有上限**:`read_index` 不得超过该用户用户链的最新 seq(调用方只能读到确实投递给它的条目),
+      越界直接拒绝 400/1001,而不是截断。
+
+    成功上报会向用户链写入一条 `kind="read"` 命令消息,故推送里带上 `seq`/`prev_seq`:
+    与 `message.new`、`message.recall` 使用同一套连续性规则,客户端发现 `prev_seq` 与本地
+    cursor 不连续时可以立即调 `/sync` 补拉。
+    """
     conv, member = _require_member(db, conversation_id, me.user_id)
-    message_service.mark_read(db, member, payload.read_index)
-    now = _now()
-    row = InboxMessage(
-        user_id=me.user_id,
-        conversation_id=conversation_id,
-        kind="read",
-        payload={"conversation_id": conversation_id, "read_index": payload.read_index},
-        create_time=now,
-    )
-    db.add(row)
-    db.flush()
+    read_event = message_service.mark_read(db, member, payload.read_index)
+    if read_event is None:
+        return ok(None, message="已读位置未变化")
+    # 事务已提交后再推送,避免推送出去的内容与库内状态不一致
     await manager.push_to_user(
         me.user_id,
         {
             "type": "read.sync",
-            "data": {"conversation_id": conversation_id, "read_index": payload.read_index},
+            "seq": read_event.seq,
+            "prev_seq": read_event.prev_seq,
+            "data": {
+                "conversation_id": read_event.conversation_id,
+                "read_index": read_event.read_index,
+            },
         },
     )
-    db.commit()
     return ok(None, message="已上报已读")
