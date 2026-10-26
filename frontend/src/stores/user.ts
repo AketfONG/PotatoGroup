@@ -5,10 +5,11 @@ import { ref } from 'vue'
 
 import * as api from '@/api'
 import { setToken } from '@/api/http'
-import type { UserSummary } from '@/api/types'
+import type { UserProfile, UserSummary } from '@/api/types'
 
 export const useUserStore = defineStore('user', () => {
   const user = ref<UserSummary | null>(null)
+  const profile = ref<UserProfile | null>(null)
   const loggedIn = ref(false)
 
   async function login(name: string, password: string): Promise<void> {
@@ -20,7 +21,6 @@ export const useUserStore = defineStore('user', () => {
 
   async function register(name: string, password: string): Promise<void> {
     await api.register(name, password)
-    // 注册后自动登录,减少一步跳转
     await login(name, password)
   }
 
@@ -30,16 +30,17 @@ export const useUserStore = defineStore('user', () => {
     } finally {
       setToken(null)
       user.value = null
+      profile.value = null
       loggedIn.value = false
     }
   }
 
-  /** 页面刷新后恢复登录态 */
   async function restore(): Promise<void> {
     if (!user.value) {
       try {
-        const profile = await api.myProfile()
-        user.value = { user_id: profile.user_id, name: profile.name, avatar: profile.avatar, online: true }
+        const p = await api.myProfile()
+        profile.value = p
+        user.value = { user_id: p.user_id, name: p.name, avatar: p.avatar, online: true }
         loggedIn.value = true
       } catch {
         loggedIn.value = false
@@ -47,5 +48,45 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  return { user, loggedIn, login, register, logout, restore }
+  async function loadProfile(): Promise<UserProfile> {
+    const p = await api.myProfile()
+    profile.value = p
+    user.value = { user_id: p.user_id, name: p.name, avatar: p.avatar, online: true }
+    return p
+  }
+
+  async function updateProfile(payload: {
+    name?: string
+    avatar?: string | null
+    email?: string | null
+    phone?: string | null
+    old_password?: string
+    new_password?: string
+  }): Promise<UserProfile> {
+    const p = await api.updateProfile(payload)
+    profile.value = p
+    user.value = { user_id: p.user_id, name: p.name, avatar: p.avatar, online: true }
+    return p
+  }
+
+  async function deleteAccount(): Promise<void> {
+    await api.deleteAccount()
+    setToken(null)
+    user.value = null
+    profile.value = null
+    loggedIn.value = false
+  }
+
+  return {
+    user,
+    profile,
+    loggedIn,
+    login,
+    register,
+    logout,
+    restore,
+    loadProfile,
+    updateProfile,
+    deleteAccount,
+  }
 })

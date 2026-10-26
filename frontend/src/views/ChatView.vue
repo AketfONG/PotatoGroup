@@ -1,130 +1,86 @@
 <script setup lang="ts">
-// 聊天主界面:左侧会话列表 + 右侧消息区(骨架阶段的核心布局)
-import { NEmpty } from 'naive-ui'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ArrowLeft } from '@lucide/vue'
+import { NButton, NEmpty, NSpace } from 'naive-ui'
+import { computed, ref } from 'vue'
 
+import AppIcon from '@/components/AppIcon.vue'
 import ConversationList from '@/components/ConversationList.vue'
+import GroupManageDrawer from '@/components/GroupManageDrawer.vue'
 import MessageInput from '@/components/MessageInput.vue'
 import MessageList from '@/components/MessageList.vue'
 import { useChatStore } from '@/stores/chat'
-import { useUserStore } from '@/stores/user'
 
-const userStore = useUserStore()
 const chatStore = useChatStore()
-const router = useRouter()
-const started = ref(false)
+const showGroup = ref(false)
 
-onMounted(async () => {
-  await userStore.restore()
-  if (!userStore.loggedIn) {
-    await router.replace('/login')
-    return
-  }
-  try {
-    await chatStore.startSession()
-    started.value = true
-  } catch {
-    await userStore.logout()
-    await router.replace('/login')
-  }
-})
+/** 窄屏:有活动会话时只显示聊天区 */
+const paneOpen = computed(() => chatStore.activeId !== null)
 
-onBeforeUnmount(() => {
-  chatStore.endSession()
-})
-
-async function handleLogout(): Promise<void> {
-  await userStore.logout()
-  await router.replace('/login')
+function backToList(): void {
+  chatStore.clearActiveConversation()
 }
 </script>
 
 <template>
-  <div class="chat-layout">
-    <!-- 顶栏 -->
-    <header class="chat-header">
-      <div class="header-left">
-        <span class="logo">🥔 土豆聊天</span>
-      </div>
-      <div class="header-right">
-        <span class="username">{{ userStore.user?.name ?? '' }}</span>
-        <a class="logout" @click="handleLogout">退出登录</a>
-      </div>
-    </header>
-
-    <!-- 主体:会话列表 + 消息区 -->
-    <div class="chat-body">
-      <aside class="sidebar">
-        <ConversationList />
-      </aside>
-      <main class="chat-main">
-        <template v-if="chatStore.activeConversation">
-          <div class="chat-main-header">
+  <div class="chat-body" :class="{ 'pane-open': paneOpen }">
+    <aside class="sidebar">
+      <ConversationList />
+    </aside>
+    <main class="chat-main">
+      <template v-if="chatStore.activeConversation">
+        <div class="chat-main-header">
+          <div class="title-block">
+            <n-button
+              class="back-btn"
+              quaternary
+              circle
+              size="small"
+              aria-label="返回会话列表"
+              @click="backToList"
+            >
+              <AppIcon :icon="ArrowLeft" :size="18" />
+            </n-button>
             <span class="conv-name">{{ chatStore.activeConversation.name ?? '会话' }}</span>
             <span class="conv-meta">
-              {{ chatStore.activeConversation.type === 'group'
-                ? `${chatStore.activeConversation.member_count} 人`
-                : '' }}
+              {{
+                chatStore.activeConversation.type === 'group'
+                  ? `${chatStore.activeConversation.member_count} 人`
+                  : '私聊'
+              }}
             </span>
           </div>
-          <MessageList />
-          <MessageInput />
-        </template>
-        <n-empty v-else class="chat-empty" description="选择左侧会话开始聊天" size="large" />
-      </main>
-    </div>
+          <n-space>
+            <n-button
+              v-if="chatStore.activeConversation.type === 'group'"
+              size="small"
+              quaternary
+              @click="showGroup = true"
+            >
+              群管理
+            </n-button>
+          </n-space>
+        </div>
+        <MessageList />
+        <MessageInput />
+        <GroupManageDrawer v-model:show="showGroup" />
+      </template>
+      <n-empty v-else class="chat-empty" description="选择左侧会话开始聊天" size="large" />
+    </main>
   </div>
 </template>
 
 <style scoped>
-.chat-layout {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: #f3f6f4;
-}
-
-.chat-header {
-  height: 52px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  background: #fff;
-  border-bottom: 1px solid #eaeef2;
-}
-
-.logo {
-  font-weight: 600;
-  font-size: 16px;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-size: 13px;
-  color: #666;
-}
-
-.logout {
-  color: #d03050;
-  cursor: pointer;
-}
-
 .chat-body {
   flex: 1;
   display: flex;
   min-height: 0;
+  height: 100%;
 }
 
 .sidebar {
   width: 280px;
   flex: none;
-  background: #fff;
-  border-right: 1px solid #eaeef2;
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -136,6 +92,7 @@ async function handleLogout(): Promise<void> {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  background: var(--bg);
 }
 
 .chat-main-header {
@@ -143,17 +100,37 @@ async function handleLogout(): Promise<void> {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
   padding: 0 18px;
-  background: #fff;
-  border-bottom: 1px solid #eaeef2;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.title-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.back-btn {
+  display: none;
+  flex: none;
+}
+
+.conv-name {
   font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conv-meta {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted);
   font-weight: 400;
+  flex: none;
 }
 
 .chat-empty {
@@ -161,5 +138,33 @@ async function handleLogout(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+@media (max-width: 720px) {
+  .sidebar {
+    width: 100%;
+    border-right: none;
+  }
+
+  .chat-main {
+    display: none;
+  }
+
+  .chat-body.pane-open .sidebar {
+    display: none;
+  }
+
+  .chat-body.pane-open .chat-main {
+    display: flex;
+    width: 100%;
+  }
+
+  .back-btn {
+    display: inline-flex;
+  }
+
+  .chat-main-header {
+    padding: 0 10px;
+  }
 }
 </style>

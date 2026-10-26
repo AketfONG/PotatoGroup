@@ -1,0 +1,162 @@
+{
+  "_comment": "前端 mock 模式预设数据模板(npm run dev:mock)。db.json 由其播种且不入库;所有密码均为 password123。",
+  "nextIds": { "user": 100, "conversation": 10, "message": 1000, "friendRequest": 10, "seq": 100 },
+  "users": [
+    {
+      "user_id": 1,
+      "name": "potato",
+      "password": "password123",
+      "avatar": null,
+      "email": "potato@example.com",
+      "phone": null,
+      "register_time": 1730000000,
+      "login_time": 1739900000
+    },
+    {
+      "user_id": 2,
+      "name": "小土豆",
+      "password": "password123",
+      "avatar": null,
+      "email": "small@example.com",
+      "phone": null,
+      "register_time": 1730000100,
+      "login_time": 1739890000
+    },
+    {
+      "user_id": 3,
+      "name": "薯条",
+      "password": "password123",
+      "avatar": null,
+      "email": "fries@example.com",
+      "phone": null,
+      "register_time": 1730000200,
+      "login_time": 1739880000
+    },
+    {
+      "user_id": 4,
+      "name": "薯片",
+      "password": "password123",
+      "avatar": null,
+      "email": "chips@example.com",
+      "phone": null,
+      "register_time": 1730000300,
+      "login_time": null
+    }
+  ],
+  "friendships": [
+    { "user_id": 1, "friend_user_id": 2, "remark": null, "group_name": null },
+    { "user_id": 2, "friend_user_id": 1, "remark": null, "group_name": null },
+    { "user_id": 1, "friend_user_id": 3, "remark": "土豆丝", "group_name": null },
+    { "user_id": 3, "friend_user_id": 1, "remark": null, "group_name": null },
+    { "user_id": 1, "friend_user_id": 4, "remark": null, "group_name": "零食组" },
+    { "user_id": 4, "friend_user_id": 1, "remark": null, "group_name": null }
+  ],
+  "friendRequests": [
+    {
+      "request_id": 1,
+      "from_user": 3,
+      "to_user_id": 2,
+      "status": "pending",
+      "create_time": 1739850000
+    }
+  ],
+  "conversations": [
+    {
+      "conversation_id": 1,
+      "name": null,
+      "type": "private",
+      "avatar": null,
+      "owner_id": null,
+      "announcement": null,
+      "create_time": 1739000000,
+      "update_time": 1739950120,
+      "member_ids": [1, 2]
+    },
+    {
+      "conversation_id": 2,
+      "name": "土豆Club",
+      "type": "group",
+      "avatar": null,
+      "owner_id": 1,
+      "announcement": "每周五聚餐,带好土豆",
+      "create_time": 1739100000,
+      "update_time": 1739960060,
+      "member_ids": [1, 2, 3]
+    }
+  ],
+  "messages": [
+    {
+      "msg_id": 900,
+      "conversation_id": 1,
+      "sender_id": 2,
+      "body": "在吗?",
+      "reply_to": null,
+      "create_time": 1739950000,
+      "recalled": false
+    },
+    {
+      "msg_id": 901,
+      "conversation_id": 1,
+      "sender_id": 1,
+      "body": "在的,怎么了?",
+      "reply_to": null,
+      "create_time": 1739950060,
+      "recalled": false
+    },
+    {
+      "msg_id": 902,
+      "conversation_id": 1,
+      "sender_id": 2,
+      "body": "晚上一起吃土豆吗 🥔",
+      "reply_to": null,
+      "create_time": 1739950120,
+      "recalled": false
+    },
+    {
+      "msg_id": 910,
+      "conversation_id": 2,
+      "sender_id": 3,
+      "body": "这周五聚餐去不去?",
+      "reply_to": null,
+      "create_time": 1739960000,
+      "recalled": false
+    },
+    {
+      "msg_id": 911,
+      "conversation_id": 2,
+      "sender_id": 1,
+      "body": "去!我带烤土豆",
+      "reply_to": null,
+      "create_time": 1739960060,
+      "recalled": false
+    }
+  ],
+  "messageSeqs": [
+    { "msg_id": 900, "user_id": 1, "seq": 1 },
+    { "msg_id": 901, "user_id": 1, "seq": 2 },
+    { "msg_id": 902, "user_id": 1, "seq": 3 },
+    { "msg_id": 910, "user_id": 1, "seq": 4 },
+    { "msg_id": 911, "user_id": 1, "seq": 5 },
+    { "msg_id": 900, "user_id": 2, "seq": 1 },
+    { "msg_id": 901, "user_id": 2, "seq": 2 },
+    { "msg_id": 902, "user_id": 2, "seq": 3 },
+    { "msg_id": 910, "user_id": 2, "seq": 4 },
+    { "msg_id": 911, "user_id": 2, "seq": 5 },
+    { "msg_id": 910, "user_id": 3, "seq": 1 },
+    { "msg_id": 911, "user_id": 3, "seq": 2 }
+  ],
+  "deletedMsgs": [],
+  "readState": [
+    { "user_id": 1, "conversation_id": 1, "last_read_msg_id": 902 },
+    { "user_id": 1, "conversation_id": 2, "last_read_msg_id": 910 }
+  ],
+  "settings": [{ "user_id": 1, "conversation_id": 2, "pinned": true, "muted": false }],
+  "seqs": [
+    { "user_id": 1, "cursor": 5 },
+    { "user_id": 2, "cursor": 5 },
+    { "user_id": 3, "cursor": 2 },
+    { "user_id": 4, "cursor": 0 }
+  ],
+  "syncEvents": [],
+  "tokens": {}
+}

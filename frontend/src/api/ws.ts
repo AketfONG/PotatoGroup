@@ -1,15 +1,16 @@
 /**
  * WebSocket 客户端:握手鉴权、30s 心跳、断线重连、prev_seq 连续性校验。
  *
- * 一致性校验(需求文档 Phase 3):推送携带 prev_seq,若与本地 cursor 不一致,
- * 说明有推送丢失,立即调用 REST GET /sync 补拉,保证消息不丢。
+ * 缺口时调用 /sync 补拉,并通过 onResync 把结果交给 chat store 合并。
  */
 
-import { getToken, setToken } from './http'
+import { getToken } from './http'
+import { isMockMode } from './index'
 import * as api from './index'
 import type { SyncOut, WsEvent } from './types'
 
 export type WsHandler = (event: WsEvent) => void
+export type ResyncHandler = (out: SyncOut) => void
 
 const HEARTBEAT_INTERVAL_MS = 30_000
 const RECONNECT_BASE_DELAY_MS = 1_000
@@ -18,6 +19,7 @@ const RECONNECT_MAX_DELAY_MS = 30_000
 export class WsClient {
   private ws: WebSocket | null = null
   private handlers = new Set<WsHandler>()
+  private resyncHandlers = new Set<ResyncHandler>()
   private heartbeatTimer: number | null = null
   private reconnectTimer: number | null = null
   private reconnectAttempts = 0
@@ -34,7 +36,15 @@ export class WsClient {
     return () => this.handlers.delete(handler)
   }
 
+  /** 订阅补拉结果(chat store 用此合并消息) */
+  onResync(handler: ResyncHandler): () => void {
+    this.resyncHandlers.add(handler)
+    return () => this.resyncHandlers.delete(handler)
+  }
+
   connect(): void {
+    // mock 模式无后端:跳过 WS 连接(数据经 mock REST /sync 轮询语义一致)
+    if (isMockMode) return
     const token = getToken()
     if (!token) return
     this.closedByUser = false
@@ -47,6 +57,8 @@ export class WsClient {
     ws.onopen = () => {
       this.reconnectAttempts = 0
       this.startHeartbeat()
+      // 重连后补拉,避免断线期间漏消息
+      if (this.localSeq > 0) void this.resync()
     }
 
     ws.onmessage = (raw) => {
@@ -66,16 +78,14 @@ export class WsClient {
     }
 
     ws.onerror = () => {
-      // onclose 会跟随触发,重连逻辑在那里处理
+      /* onclose 会跟随触发 */
     }
   }
 
   private async handleEvent(event: WsEvent): Promise<void> {
-    // 这三个事件都会占用用户链一个 seq,必须做同样的连续性校验:
-    // 漏掉 read.sync 会让已读上报把本地 cursor 打断,之后每条推送都误判为"有缺口"。
+    // docs/02:连续性校验覆盖 message.new / message.recall / read.sync
     if (event.type === 'message.new' || event.type === 'message.recall' || event.type === 'read.sync') {
       const { prev_seq, seq } = event
-      // 首条消息 prev_seq 为 0;之后必须严格衔接本地 cursor
       if (this.localSeq !== 0 && prev_seq !== this.localSeq) {
         await this.resync()
       } else {
@@ -84,13 +94,21 @@ export class WsClient {
     }
   }
 
-  /** 断线补拉:从本地 cursor 起增量同步用户链 */
   async resync(): Promise<SyncOut> {
     const out = await api.sync(this.localSeq)
+    let cursor = out.next_cursor
+    while (cursor !== null) {
+      const more = await api.sync(cursor)
+      out.items.push(...more.items)
+      cursor = more.next_cursor
+    }
+    if (out.items.length > 0) {
+      this.localSeq = out.items[out.items.length - 1].seq
+    }
+    for (const h of this.resyncHandlers) h(out)
     return out
   }
 
-  /** 登录后拉取全量链,初始化 localSeq */
   async initialSync(): Promise<SyncOut> {
     const out = await api.sync(0)
     let cursor: number | null = out.next_cursor
@@ -137,8 +155,8 @@ export class WsClient {
     this.clearTimers()
     this.ws?.close()
     this.ws = null
+    this.localSeq = 0
   }
 }
 
-/** 全局单例 */
 export const wsClient = new WsClient()

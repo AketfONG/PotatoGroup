@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 登录 / 注册页(界面全中文)
+import { Moon, Sun } from '@lucide/vue'
 import {
   NButton,
   NCard,
@@ -12,10 +12,13 @@ import type { FormInst, FormRules } from 'naive-ui'
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import AppIcon from '@/components/AppIcon.vue'
 import { ApiError } from '@/api/http'
+import { useThemeStore } from '@/stores/theme'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
+const themeStore = useThemeStore()
 const router = useRouter()
 const route = useRoute()
 const message = useMessage()
@@ -34,6 +37,16 @@ const rules: FormRules = {
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
     { min: 8, max: 64, message: '密码长度需在 8-64 位之间', trigger: 'blur' },
+    {
+      validator: (_r, value: string) => {
+        if (!value) return true
+        if (!/[A-Za-z]/.test(value) || !/[0-9]/.test(value)) {
+          return new Error('密码需同时包含字母和数字')
+        }
+        return true
+      },
+      trigger: 'blur',
+    },
   ],
 }
 
@@ -65,11 +78,21 @@ async function submit(): Promise<void> {
 
 <template>
   <div class="login-page">
+    <div class="theme-toggle">
+      <n-button
+        quaternary
+        circle
+        size="small"
+        :aria-label="themeStore.mode === 'light' ? '切换深色模式' : '切换浅色模式'"
+        @click="themeStore.toggle()"
+      >
+        <AppIcon :icon="themeStore.mode === 'light' ? Moon : Sun" :size="16" />
+      </n-button>
+    </div>
     <n-card class="login-card" :bordered="false">
       <div class="brand">
-        <span class="brand-emoji">🥔</span>
         <h1 class="brand-title">土豆聊天</h1>
-        <p class="brand-sub"> Potato Messenger</p>
+        <p class="brand-sub">即时通讯</p>
       </div>
 
       <n-form ref="formRef" :model="{ name, password }" :rules="rules" label-placement="top" size="large">
@@ -87,13 +110,13 @@ async function submit(): Promise<void> {
           />
         </n-form-item>
         <n-button type="primary" block size="large" :loading="loading" @click="submit">
-          {{ mode === 'login' ? '登 录' : '注 册' }}
+          {{ mode === 'login' ? '登录' : '注册' }}
         </n-button>
       </n-form>
 
       <div class="switch-mode">
         {{ mode === 'login' ? '还没有账号?' : '已有账号?' }}
-        <a @click="mode = mode === 'login' ? 'register' : 'login'">
+        <a href="#" @click.prevent="mode = mode === 'login' ? 'register' : 'login'">
           {{ mode === 'login' ? '注册一个' : '去登录' }}
         </a>
       </div>
@@ -107,13 +130,21 @@ async function submit(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #f5f0e8 0%, #e8ddd0 100%);
+  background: var(--bg);
+  position: relative;
+}
+
+.theme-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
 }
 
 .login-card {
   width: 380px;
-  border-radius: 16px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-surface);
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
 
 .brand {
@@ -121,30 +152,29 @@ async function submit(): Promise<void> {
   margin-bottom: 24px;
 }
 
-.brand-emoji {
-  font-size: 44px;
-}
-
 .brand-title {
-  margin: 8px 0 4px;
-  font-size: 22px;
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 650;
+  color: var(--text);
+  letter-spacing: 0.02em;
 }
 
 .brand-sub {
   margin: 0;
-  color: #999;
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 .switch-mode {
   margin-top: 16px;
   text-align: center;
   font-size: 13px;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .switch-mode a {
-  color: #18a058;
+  color: var(--accent);
   cursor: pointer;
   margin-left: 4px;
 }

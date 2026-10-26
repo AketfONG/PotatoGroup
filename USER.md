@@ -157,6 +157,8 @@ flowchart LR
 | 调用或修改接口、加新端点 | [docs/02-API约定.md](docs/02-API约定.md) |
 | 改表结构、加字段、写迁移 | [docs/03-数据库设计.md](docs/03-数据库设计.md) |
 | 部署、CI/CD、SECoder | [docs/04-部署方案.md](docs/04-部署方案.md) |
+| 前端界面规范 / 主题令牌 | [docs/05-前端界面规范.md](docs/05-前端界面规范.md) |
+| 前端模块验收与同步说明 | [docs/06-前端模块说明.md](docs/06-前端模块说明.md) |
 | 是 AI Agent,要动这个仓库 | [AGENTS.md](AGENTS.md) |
 
 ## 11. 部署

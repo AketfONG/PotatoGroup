@@ -1,9 +1,8 @@
 <script setup lang="ts">
-// 输入区:Enter 发送,Shift+Enter 换行
-import { NButton, NInput } from 'naive-ui'
-import { useMessage } from 'naive-ui'
+import { NButton, NInput, useMessage } from 'naive-ui'
 import { ref } from 'vue'
 
+import { ApiError } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 
 const chatStore = useChatStore()
@@ -18,8 +17,8 @@ async function send(): Promise<void> {
   try {
     await chatStore.sendMessage(body)
     draft.value = ''
-  } catch {
-    message.error('发送失败,请检查网络后重试')
+  } catch (e) {
+    message.error(e instanceof ApiError ? e.message : '发送失败,请检查网络后重试')
   } finally {
     sending.value = false
   }
@@ -28,26 +27,61 @@ async function send(): Promise<void> {
 
 <template>
   <div class="input-area">
-    <n-input
-      v-model:value="draft"
-      type="textarea"
-      :rows="3"
-      placeholder="输入消息,Enter 发送,Shift+Enter 换行"
-      :disabled="!chatStore.activeId"
-      @keydown.enter.exact.prevent="send"
-    />
-    <n-button type="primary" :loading="sending" :disabled="!draft.trim()" @click="send">发送</n-button>
+    <div v-if="chatStore.replyTo" class="reply-bar">
+      <span class="reply-text">回复: {{ chatStore.replyTo.body.slice(0, 60) }}</span>
+      <a @click="chatStore.setReplyTo(null)">取消</a>
+    </div>
+    <div class="input-row">
+      <n-input
+        v-model:value="draft"
+        type="textarea"
+        :rows="3"
+        placeholder="输入消息,Enter 发送,Shift+Enter 换行;右键消息可回复/撤回/删除"
+        :disabled="!chatStore.activeId"
+        @keydown.enter.exact.prevent="send"
+      />
+      <n-button type="primary" :loading="sending" :disabled="!draft.trim()" @click="send">发送</n-button>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .input-area {
   flex: none;
+  padding: 10px 18px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.reply-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  padding: 6px 12px;
+  background: var(--hover);
+  border-radius: var(--radius-control);
+  border-left: 3px solid var(--accent);
+}
+
+.reply-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reply-bar a {
+  cursor: pointer;
+  color: var(--accent);
+  flex: none;
+  margin-left: 12px;
+}
+
+.input-row {
   display: flex;
   gap: 12px;
   align-items: flex-end;
-  padding: 12px 18px 16px;
-  background: #fff;
-  border-top: 1px solid #eaeef2;
 }
 </style>

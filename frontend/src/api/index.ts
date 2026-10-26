@@ -1,135 +1,48 @@
 /**
- * 类型化 API 门面:所有 REST 端点按 docs/02-API约定.md 聚合在此,
- * 组件与 store 不直接拼接 URL。
+ * 类型化 API 门面:按运行模式分发到真实后端(real.ts)或前端 mock(mockApi.ts)。
+ * 契约见 docs/02-API约定.md;组件与 store 不直接拼接 URL、不感知模式。
  */
 
-import { http, unwrap } from './http'
-import type {
-  Conversation,
-  ConversationItem,
-  FriendItem,
-  FriendRequest,
-  FriendRequestListOut,
-  FriendListOut,
-  HistoryOut,
-  LoginOut,
-  Message,
-  SyncOut,
-  UserProfile,
-  UserSearchOut,
-  UserSummary,
-} from './types'
+import { mockApi } from './mock/mockApi'
+import * as real from './real'
 
-// ---------- 认证 ----------
+export type Api = typeof real
 
-export async function register(name: string, password: string): Promise<{ user_id: number }> {
-  return unwrap<{ user_id: number }>(http.post('/auth/register', { name, password }))
-}
+/** mock 模式标记:vite --mode mock 时为 true(WS 等据此跳过真实连接) */
+export const isMockMode: boolean = import.meta.env.MODE === 'mock'
 
-export async function login(name: string, password: string): Promise<LoginOut> {
-  return unwrap<LoginOut>(http.post('/auth/login', { name, password }))
-}
+const impl: Api = isMockMode ? (mockApi satisfies typeof real) : real
 
-export async function logout(): Promise<void> {
-  await unwrap(http.delete('/auth/logout'))
-}
-
-// ---------- 用户 ----------
-
-export async function myProfile(): Promise<UserProfile> {
-  return unwrap<UserProfile>(http.get('/users/me'))
-}
-
-export async function searchUsers(keyword: string): Promise<UserSearchOut> {
-  return unwrap<UserSearchOut>(http.get('/users', { params: { keyword } }))
-}
-
-// ---------- 好友 ----------
-
-export async function listFriends(): Promise<FriendListOut> {
-  return unwrap<FriendListOut>(http.get('/friends'))
-}
-
-export async function deleteFriend(friendUserId: number): Promise<void> {
-  await unwrap(http.delete(`/friends/${friendUserId}`))
-}
-
-export async function createFriendRequest(targetUserId: number): Promise<FriendRequest> {
-  return unwrap<FriendRequest>(http.post('/friend-requests', { target_user_id: targetUserId }))
-}
-
-export async function listFriendRequests(): Promise<FriendRequestListOut> {
-  return unwrap<FriendRequestListOut>(http.get('/friend-requests'))
-}
-
-export async function acceptFriendRequest(requestId: number): Promise<void> {
-  await unwrap(http.post(`/friend-requests/${requestId}/accept`))
-}
-
-export async function rejectFriendRequest(requestId: number): Promise<void> {
-  await unwrap(http.post(`/friend-requests/${requestId}/reject`))
-}
-
-// ---------- 会话 ----------
-
-export async function listConversations(): Promise<{ items: ConversationItem[] }> {
-  return unwrap<{ items: ConversationItem[] }>(http.get('/conversations'))
-}
-
-export async function createGroup(name: string, memberIds: number[]): Promise<Conversation> {
-  return unwrap<Conversation>(http.post('/conversations', { name, member_ids: memberIds }))
-}
-
-export async function createPrivateChat(targetUserId: number): Promise<Conversation> {
-  return unwrap<Conversation>(http.post('/conversations/private', { target_user_id: targetUserId }))
-}
-
-export async function conversationDetail(conversationId: number): Promise<Conversation> {
-  return unwrap<Conversation>(http.get(`/conversations/${conversationId}`))
-}
-
-export async function updateMyConversationSettings(
-  conversationId: number,
-  settings: { pinned?: boolean; muted?: boolean },
-): Promise<void> {
-  await unwrap(http.patch(`/conversations/${conversationId}/me`, settings))
-}
-
-export async function markRead(conversationId: number, readIndex: number): Promise<void> {
-  await unwrap(http.post(`/conversations/${conversationId}/read`, { read_index: readIndex }))
-}
-
-// ---------- 消息与同步 ----------
-
-export async function sendMessage(conversationId: number, body: string, replyTo: number | null = null): Promise<Message> {
-  return unwrap<Message>(http.post(`/conversations/${conversationId}/messages`, { body, reply_to: replyTo }))
-}
-
-export async function conversationHistory(
-  conversationId: number,
-  cursor?: number | null,
-  filters: { sender_id?: number; start_time?: number; end_time?: number } = {},
-): Promise<HistoryOut> {
-  return unwrap<HistoryOut>(
-    http.get(`/conversations/${conversationId}/messages`, {
-      params: { cursor: cursor ?? undefined, limit: 50, ...filters },
-    }),
-  )
-}
-
-export async function recallMessage(conversationId: number, msgId: number): Promise<void> {
-  await unwrap(http.post(`/conversations/${conversationId}/messages/${msgId}/recall`))
-}
-
-/** 本地删除:只对我生效(服务端写 `kind="delete"` 墓碑),其他成员不受影响 */
-export async function deleteMessage(conversationId: number, msgId: number): Promise<void> {
-  await unwrap(http.delete(`/conversations/${conversationId}/messages/${msgId}`))
-}
-
-export async function sync(cursor: number): Promise<SyncOut> {
-  return unwrap<SyncOut>(http.get('/sync', { params: { cursor, limit: 200 } }))
-}
+// 显式再导出,保持 stores 既有 `import * as api from '@/api'` 用法不变
+export const register = impl.register
+export const login = impl.login
+export const logout = impl.logout
+export const myProfile = impl.myProfile
+export const updateProfile = impl.updateProfile
+export const deleteAccount = impl.deleteAccount
+export const getUser = impl.getUser
+export const searchUsers = impl.searchUsers
+export const listFriends = impl.listFriends
+export const deleteFriend = impl.deleteFriend
+export const createFriendRequest = impl.createFriendRequest
+export const listFriendRequests = impl.listFriendRequests
+export const acceptFriendRequest = impl.acceptFriendRequest
+export const rejectFriendRequest = impl.rejectFriendRequest
+export const listConversations = impl.listConversations
+export const createGroup = impl.createGroup
+export const createPrivateChat = impl.createPrivateChat
+export const conversationDetail = impl.conversationDetail
+export const updateConversation = impl.updateConversation
+export const addMembers = impl.addMembers
+export const removeMember = impl.removeMember
+export const leaveConversation = impl.leaveConversation
+export const updateMyConversationSettings = impl.updateMyConversationSettings
+export const markRead = impl.markRead
+export const sendMessage = impl.sendMessage
+export const conversationHistory = impl.conversationHistory
+export const recallMessage = impl.recallMessage
+export const deleteMessage = impl.deleteMessage
+export const sync = impl.sync
 
 // ---------- 供类型检查导出 ----------
-
-export type { FriendItem, UserSummary }
+export type { FriendItem, UserSummary } from './types'

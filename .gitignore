@@ -35,6 +35,9 @@ pnpm-debug.log*
 *.sqlite
 *.sqlite3
 
+# 前端 mock 模式的可变本地库(由 frontend/mock/db.preset.json 播种,不入库)
+frontend/mock/db.json
+
 # ---------- 日志 ----------
 # 本地产物不读不入库(见 AGENTS.md 规则 2)
 *.log
@@ -47,3 +50,6 @@ logs/
 .vscode/
 *.swp
 .DS_Store
+
+# Agent skills 本地安装(如 hallmark,体积大不入库;安装见 docs/05)
+.agents/

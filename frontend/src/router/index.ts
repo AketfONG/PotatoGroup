@@ -13,15 +13,33 @@ const router = createRouter({
     },
     {
       path: '/',
-      name: 'chat',
-      component: () => import('@/views/ChatView.vue'),
-      meta: { title: '土豆聊天', requiresAuth: true },
+      component: () => import('@/components/MainLayout.vue'),
+      meta: { requiresAuth: true },
+      children: [
+        {
+          path: '',
+          name: 'chat',
+          component: () => import('@/views/ChatView.vue'),
+          meta: { title: '土豆聊天', requiresAuth: true },
+        },
+        {
+          path: 'friends',
+          name: 'friends',
+          component: () => import('@/views/FriendsView.vue'),
+          meta: { title: '好友 - 土豆聊天', requiresAuth: true },
+        },
+        {
+          path: 'profile',
+          name: 'profile',
+          component: () => import('@/views/ProfileView.vue'),
+          meta: { title: '资料 - 土豆聊天', requiresAuth: true },
+        },
+      ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 
-// 登录守卫:未登录访问受保护页面时跳转登录页
 router.beforeEach((to) => {
   document.title = String(to.meta.title ?? '土豆聊天')
   if (to.meta.requiresAuth && !getToken()) {

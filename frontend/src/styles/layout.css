@@ -1,0 +1,24 @@
+/**
+ * 非聊天页居中列 + 轻量响应式。
+ * 聊天工作台保持全宽(见 ChatView)。
+ */
+
+.page-centred {
+  width: 100%;
+  max-width: 840px;
+  margin-inline: auto;
+  padding: 24px 20px;
+  box-sizing: border-box;
+}
+
+.page-centred.page-scroll {
+  height: 100%;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  .page-centred {
+    max-width: none;
+    padding: 16px 14px;
+  }
+}
